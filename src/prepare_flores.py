@@ -1,4 +1,5 @@
 import argparse
+import shutil
 from pathlib import Path
 
 from datasets import load_dataset
@@ -25,9 +26,20 @@ def main():
     paths = ensure_dirs(cfg)
 
     dataset_cfg = cfg["dataset"]
+    source = dataset_cfg.get("source", "flores")
     split = dataset_cfg.get("split", "dev")
     sample_size = int(dataset_cfg.get("sample_size_per_language", 200))
     languages = dataset_cfg["languages"]
+
+    out_path = Path(paths["data"]) / "parallel_samples.jsonl"
+
+    if source == "local_jsonl":
+        input_path = dataset_cfg.get("local_path")
+        if not input_path:
+            raise ValueError("dataset.source='local_jsonl' requires dataset.local_path")
+        shutil.copyfile(input_path, out_path)
+        print(f"Copied local dataset from {input_path} to {out_path}")
+        return
 
     rows = []
     for short_lang, flores_lang in tqdm(languages.items(), desc="Loading FLORES languages"):
@@ -44,11 +56,9 @@ def main():
                 }
             )
 
-    out_path = Path(paths["data"]) / "parallel_samples.jsonl"
     write_jsonl(str(out_path), rows)
     print(f"Wrote {len(rows)} rows to {out_path}")
 
 
 if __name__ == "__main__":
     main()
-

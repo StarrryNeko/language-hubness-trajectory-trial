@@ -49,6 +49,21 @@ python src/compute_metrics.py --config configs/qwen25_1_5b_mvp.json
 python src/plot_trajectories.py --config configs/qwen25_1_5b_mvp.json
 ```
 
+If the cloud machine cannot reach HuggingFace, first try a mirror:
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com
+```
+
+If the machine has no network at all, create a tiny toy dataset to test the rest of the pipeline:
+
+```bash
+python src/make_toy_data.py --config configs/qwen25_1_5b_mvp.json
+python src/extract_hidden.py --config configs/qwen25_1_5b_mvp.json
+python src/compute_metrics.py --config configs/qwen25_1_5b_mvp.json
+python src/plot_trajectories.py --config configs/qwen25_1_5b_mvp.json
+```
+
 Outputs will be written to:
 
 ```text
@@ -88,4 +103,3 @@ Contribution:
 2. Dynamic trajectory metrics for English drift and English hub attraction.
 3. Evidence of whether language centralization forms gradually, abruptly, or is corrected in late layers.
 4. A foundation for later lightweight correction at absorption / peak layers.
-
