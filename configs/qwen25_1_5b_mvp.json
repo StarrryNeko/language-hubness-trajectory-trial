@@ -1,0 +1,30 @@
+{
+  "experiment_name": "qwen25_1_5b_mvp",
+  "model_name_or_path": "Qwen/Qwen2.5-1.5B",
+  "output_dir": "outputs/qwen25_1_5b_mvp",
+  "seed": 42,
+  "device": "cuda",
+  "dtype": "float16",
+  "max_length": 128,
+  "batch_size": 1,
+  "dataset": {
+    "source": "flores",
+    "split": "dev",
+    "sample_size_per_language": 200,
+    "languages": {
+      "en": "eng_Latn",
+      "zh": "zho_Hans",
+      "de": "deu_Latn",
+      "ha": "hau_Latn"
+    }
+  },
+  "metrics": {
+    "english_language": "en",
+    "nearest_neighbors_k": 10
+  },
+  "token_export": {
+    "enabled": false,
+    "max_samples_per_language": 5
+  }
+}
+
