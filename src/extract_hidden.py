@@ -61,7 +61,8 @@ def main():
         model.to(device)
     model.eval()
 
-    sentence_vectors = []
+    sentence_last_vectors = []
+    sentence_mean_vectors = []
     meta_rows = []
 
     token_export_cfg = cfg.get("token_export", {})
@@ -89,12 +90,19 @@ def main():
             )
 
             attention_mask = encoded["attention_mask"][0]
+            full_token_count = len(tokenizer(row["text"], add_special_tokens=True)["input_ids"])
+            valid_positions = torch.nonzero(attention_mask, as_tuple=False).flatten()
+            last_position = int(valid_positions[-1].item())
             layer_means = []
+            layer_lasts = []
             for layer_hidden in outputs.hidden_states:
                 h = layer_hidden[0].detach()
                 layer_means.append(masked_mean(h, attention_mask).float().cpu().numpy())
+                layer_lasts.append(h[last_position].float().cpu().numpy())
             layer_means = np.stack(layer_means, axis=0)
-            sentence_vectors.append(layer_means)
+            layer_lasts = np.stack(layer_lasts, axis=0)
+            sentence_mean_vectors.append(layer_means)
+            sentence_last_vectors.append(layer_lasts)
 
             meta_rows.append(
                 {
@@ -104,6 +112,11 @@ def main():
                     "flores_lang": row.get("flores_lang", ""),
                     "text": row["text"],
                     "num_tokens": int(attention_mask.sum().item()),
+                    "full_num_tokens": int(full_token_count),
+                    "was_truncated": bool(full_token_count > max_length),
+                    "last_token": tokenizer.convert_ids_to_tokens(
+                        [int(encoded["input_ids"][0, last_position].item())]
+                    )[0],
                 }
             )
 
@@ -125,11 +138,20 @@ def main():
                     meta=json.dumps(row, ensure_ascii=False),
                 )
 
-    sentence_vectors = np.stack(sentence_vectors, axis=0)
-    np.save(Path(paths["hidden"]) / "sentence_layer_means.npy", sentence_vectors)
+    sentence_last_vectors = np.stack(sentence_last_vectors, axis=0)
+    sentence_mean_vectors = np.stack(sentence_mean_vectors, axis=0)
+    np.save(Path(paths["hidden"]) / "sentence_layer_last_token.npy", sentence_last_vectors)
+    np.save(Path(paths["hidden"]) / "sentence_layer_mean_pool.npy", sentence_mean_vectors)
     pd.DataFrame(meta_rows).to_csv(Path(paths["hidden"]) / "metadata.csv", index=False, encoding="utf-8")
 
-    print(f"Saved sentence vectors: {sentence_vectors.shape}")
+    truncated = sum(row["was_truncated"] for row in meta_rows)
+    print("\n=== Hidden-state extraction summary ===")
+    print(f"Rows: {len(meta_rows)} | layers: {sentence_last_vectors.shape[1]} | dim: {sentence_last_vectors.shape[2]}")
+    print(f"Saved last-token vectors: {sentence_last_vectors.shape}")
+    print(f"Saved mean-pool vectors:  {sentence_mean_vectors.shape}")
+    print(f"Truncated inputs: {truncated}/{len(meta_rows)}")
+    if truncated:
+        print("WARNING: truncated inputs can invalidate parallel-sentence comparisons.")
     print(f"Saved metadata to {Path(paths['hidden']) / 'metadata.csv'}")
 
 

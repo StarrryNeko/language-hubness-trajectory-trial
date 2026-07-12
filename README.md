@@ -12,11 +12,13 @@ The first target model is `Qwen/Qwen2.5-1.5B` on a CUDA 12.1 PyTorch environment
 
 1. Prepare a small parallel multilingual dataset from FLORES-200.
 2. Extract layer-wise hidden states from Qwen2.5-1.5B.
-3. Compute two discovery metrics:
-   - `English Drift`: whether a sample is closer to the English centroid than its own-language centroid.
-   - `English Hub Attraction`: how many nearest neighbors of a sample are English.
-4. Plot layer-wise trajectories.
-5. Inspect whether trajectories show gradual drift, threshold jumps, or late correction.
+3. Validate that the extracted sentence representation carries semantics and that cosine similarity behaves normally.
+4. Compute three core signals:
+   - `AlignmentGain`: parallel-sentence cosine minus a shuffled semantic baseline.
+   - `Anchor Specificity`: whether English is more special than Chinese, German, or Hausa pseudo-anchors.
+   - `Cross-lingual Hub Attraction`: which language occupies balanced cross-language kNN slots.
+5. Measure language re-separation with neighborhood purity and centroid separation.
+6. Plot all validation and research trajectories.
 
 ## Recommended Cloud Environment
 
@@ -41,6 +43,19 @@ pip install -r requirements.txt
 ## Quick Start
 
 From this project folder:
+
+```bash
+python src/run_pilot.py --config configs/qwen25_1_5b_mvp.json
+```
+
+The unified runner stops immediately if any stage fails. To rerun metrics and
+figures without loading the model again:
+
+```bash
+python src/run_pilot.py --config configs/qwen25_1_5b_mvp.json --skip-prepare --skip-extract
+```
+
+The equivalent individual commands are:
 
 ```bash
 python src/prepare_flores.py --config configs/qwen25_1_5b_mvp.json
@@ -74,22 +89,51 @@ outputs/qwen25_1_5b_mvp/
   figures/
 ```
 
+The extraction step saves both `last_token` (primary) and `mean_pool` sentence
+representations in one model pass. The metric step performs validation and the
+pilot analysis together, so there is no second model run.
+
+After `compute_metrics.py`, inspect the terminal report or:
+
+```text
+outputs/qwen25_1_5b_mvp/metrics/validation_report.txt
+```
+
+The main figures are:
+
+```text
+alignment_gain_by_layer.png
+similarity_sanity_check.png
+semantic_retrieval_recall1.png
+anchor_specificity_by_layer.png
+english_hub_attraction_by_layer.png
+language_neighborhood_purity.png
+centroid_separation_by_layer.png
+```
+
 ## First Discovery Questions
 
 Use the first plots to answer:
 
-1. Does Chinese drift toward the English centroid in middle layers?
-2. Does Hausa / Swahili drift earlier or more strongly than Chinese?
-3. Is German closer to English from the beginning, or does it also show a jump?
-4. Does the drift decrease in the final layers, suggesting a correction layer?
-5. Does Qwen2.5-1.5B show weaker English centralization than expected because of its Chinese-English training background?
+1. Is parallel-sentence similarity reliably above the shuffled baseline?
+2. Is English specificity higher than all pseudo-anchor languages?
+3. Does English occupy more cross-language kNN slots than the uniform baseline?
+4. Does language neighborhood purity fall in middle layers and recover late?
+5. Do last-token and mean-pool representations support the same broad pattern?
 
 ## Important Notes
 
-- The first version uses sentence-level mean hidden states. This is intentional: it is much cheaper and is enough to test whether the signal exists.
-- After sentence-level trends appear, enable token-level exports in the config and inspect token trajectories.
+- The primary representation is the final non-padding token because it has seen the full left context. Mean pooling is saved as a robustness check.
+- Hidden states are contextual representations, not pure semantic outputs. Parallel retrieval and shuffled baselines test whether they carry usable sentence semantics.
 - Keep the first run small: 100-300 sentences per language.
 - Do not save every token from every sentence at first; hidden state files grow quickly.
+
+## Interpretation Guardrails
+
+- High raw cosine alone is not semantic alignment; require positive `AlignmentGain` and above-chance parallel retrieval.
+- Positive English specificity is proximity evidence, not hubness; require English kNN attraction above the balanced baseline.
+- Falling English attraction alone is not re-separation; require late recovery of language neighborhood purity, preferably with centroid separation.
+- Do not call a late change a correction mechanism without a later intervention experiment.
 
 ## Suggested Paper Angle
 
@@ -100,6 +144,6 @@ Working title:
 Contribution:
 
 1. A hook-style framework for extracting layer-wise multilingual representations.
-2. Dynamic trajectory metrics for English drift and English hub attraction.
-3. Evidence of whether language centralization forms gradually, abruptly, or is corrected in late layers.
-4. A foundation for later lightweight correction at absorption / peak layers.
+2. Controlled sentence-level measures separating semantic alignment, English specificity, and hubness.
+3. Evidence for or against late language re-separation.
+4. Pooling and random-baseline validation of the observed trajectories.

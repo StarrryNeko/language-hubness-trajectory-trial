@@ -1,12 +1,12 @@
-# Executable Discovery Plan
+# Executable Sentence-Level Pilot Plan
 
 ## Goal
 
-Find whether non-English representations are pulled toward an English hub inside Qwen2.5-1.5B, and whether this process is gradual, abrupt, or corrected in later layers.
+Distinguish cross-lingual semantic alignment, English-specific proximity, English hubness, and late language re-separation inside Qwen2.5-1.5B.
 
 ## Phase 1: Sentence-Level Signal Check
 
-Use sentence-level mean hidden states. This is cheap and answers whether the signal exists.
+Extract last-token and mean-pool sentence representations in the same forward pass. Validation and research metrics are computed together after extraction.
 
 Run:
 
@@ -19,18 +19,23 @@ python src/plot_trajectories.py --config configs/qwen25_1_5b_mvp.json
 
 Inspect:
 
-- `figures/english_drift_by_layer.png`
+- `figures/alignment_gain_by_layer.png`
+- `figures/similarity_sanity_check.png`
+- `figures/semantic_retrieval_recall1.png`
+- `figures/anchor_specificity_by_layer.png`
 - `figures/english_hub_attraction_by_layer.png`
-- `figures/language_centrality_by_layer.png`
-- `metrics/trajectory_shapes.csv`
+- `figures/language_neighborhood_purity.png`
+- `figures/centroid_separation_by_layer.png`
+- `metrics/validation_report.txt`
 
-Expected discoveries:
+Decision rules:
 
-- Chinese may show lower English drift than Hausa if Qwen preserves Chinese better.
-- German may be close to English early because of script and language-family proximity.
-- Hausa may show stronger English attraction or weaker late correction.
+- Semantic evidence requires positive AlignmentGain and above-chance parallel retrieval.
+- English-specific proximity requires English to beat the rotated pseudo-anchors.
+- English hubness requires English neighbor share above the balanced candidate baseline.
+- Re-separation requires late recovery of neighborhood purity; centroid separation is supporting evidence.
 
-## Phase 2: Token-Level Pilot
+## Optional Phase 2: Token-Level Diagnostics
 
 Enable token export:
 
@@ -45,16 +50,16 @@ Then rerun `extract_hidden.py`.
 
 Use exported files in `hidden/token_samples/` for manual inspection.
 
-Token-level questions:
+Only run this after a stable sentence-level result. Token export is diagnostic and is not part of the core pilot.
 
 - Which tokens drift first?
 - Are punctuation and named entities natural hubs?
 - Do content tokens and function tokens behave differently?
 - Do final layers correct earlier English drift?
 
-## Phase 3: Correction Layer Test
+## Optional Phase 3: Intervention
 
-After identifying peak drift layers:
+Only after re-separation is replicated in another model:
 
 1. Pick the peak layer from `layer_summary.csv`.
 2. Apply language-centering:
@@ -76,4 +81,3 @@ After the MVP works:
 - Add languages: Arabic, Hindi, Swahili, Japanese.
 - Add models: Llama 3.1 8B, Gemma 2 2B/9B, Aya Expanse 8B.
 - Compare whether Qwen has weaker Chinese absorption than English-centric models.
-

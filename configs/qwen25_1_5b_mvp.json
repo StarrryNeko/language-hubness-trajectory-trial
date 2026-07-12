@@ -20,11 +20,12 @@
   },
   "metrics": {
     "english_language": "en",
-    "nearest_neighbors_k": 10
+    "nearest_neighbors_k": 10,
+    "representations": ["last_token", "mean_pool"],
+    "primary_representation": "last_token"
   },
   "token_export": {
     "enabled": false,
     "max_samples_per_language": 5
   }
 }
-
