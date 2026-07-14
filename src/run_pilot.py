@@ -1,6 +1,10 @@
 import argparse
+import json
+import platform
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -17,6 +21,8 @@ def main():
     parser.add_argument("--skip-extract", action="store_true")
     args = parser.parse_args()
 
+    started_at = time.perf_counter()
+    started_iso = datetime.now(timezone.utc).isoformat()
     src_dir = Path(__file__).resolve().parent
     steps = []
     if not args.skip_prepare:
@@ -31,6 +37,27 @@ def main():
     for label, script in steps:
         run_step(label, script, args.config)
 
+    with open(args.config, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    output_dir = Path(cfg["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "started_at_utc": started_iso,
+        "finished_at_utc": datetime.now(timezone.utc).isoformat(),
+        "elapsed_seconds": time.perf_counter() - started_at,
+        "config_path": str(Path(args.config).resolve()),
+        "experiment_name": cfg.get("experiment_name"),
+        "model": cfg.get("model_name_or_path"),
+        "dataset": cfg.get("dataset"),
+        "metrics": cfg.get("metrics"),
+        "python": sys.version,
+        "platform": platform.platform(),
+        "skipped_prepare": args.skip_prepare,
+        "skipped_extract": args.skip_extract,
+    }
+    (output_dir / "run_manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     print("\nPILOT PIPELINE COMPLETE")
     print("Read metrics/validation_report.txt first, then inspect figures/*.png.")
 

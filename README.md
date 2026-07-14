@@ -99,6 +99,26 @@ After `compute_metrics.py`, inspect the terminal report or:
 outputs/qwen25_1_5b_mvp/metrics/validation_report.txt
 ```
 
+Bootstrap confidence intervals, automatic claim verdicts, and pooling summaries
+are written to:
+
+```text
+metrics/research_summary.txt
+metrics/re_separation_summary.csv
+metrics/pooling_robustness_summary.csv
+figures/re_separation_strength.png
+figures/pooling_robustness_summary.png
+```
+
+Run the optional kNN robustness sweep without reloading the model:
+
+```bash
+python src/sweep_k.py --config configs/qwen25_1_5b_mvp.json --k-values 5 10 20
+```
+
+This writes isolated `metrics/k5`, `metrics/k10`, and `metrics/k20`
+directories plus `figures/k_robustness_summary.png`.
+
 The main figures are:
 
 ```text
@@ -109,6 +129,8 @@ anchor_specificity_by_layer.png
 english_hub_attraction_by_layer.png
 language_neighborhood_purity.png
 centroid_separation_by_layer.png
+re_separation_strength.png
+pooling_robustness_summary.png
 ```
 
 ## First Discovery Questions

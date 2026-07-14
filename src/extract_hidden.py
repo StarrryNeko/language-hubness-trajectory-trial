@@ -1,5 +1,6 @@
 import argparse
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +34,7 @@ def main():
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
 
+    started_at = time.perf_counter()
     cfg = load_config(args.config)
     set_seed(cfg.get("seed", 42))
     paths = ensure_dirs(cfg)
@@ -60,6 +62,8 @@ def main():
     if device != "auto":
         model.to(device)
     model.eval()
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
 
     sentence_last_vectors = []
     sentence_mean_vectors = []
@@ -145,14 +149,30 @@ def main():
     pd.DataFrame(meta_rows).to_csv(Path(paths["hidden"]) / "metadata.csv", index=False, encoding="utf-8")
 
     truncated = sum(row["was_truncated"] for row in meta_rows)
+    elapsed = time.perf_counter() - started_at
+    peak_gpu_gb = torch.cuda.max_memory_allocated() / (1024 ** 3) if torch.cuda.is_available() else 0.0
     print("\n=== Hidden-state extraction summary ===")
     print(f"Rows: {len(meta_rows)} | layers: {sentence_last_vectors.shape[1]} | dim: {sentence_last_vectors.shape[2]}")
     print(f"Saved last-token vectors: {sentence_last_vectors.shape}")
     print(f"Saved mean-pool vectors:  {sentence_mean_vectors.shape}")
     print(f"Truncated inputs: {truncated}/{len(meta_rows)}")
+    print(f"Extraction time: {elapsed:.1f}s | peak allocated GPU memory: {peak_gpu_gb:.2f} GiB")
     if truncated:
         print("WARNING: truncated inputs can invalidate parallel-sentence comparisons.")
     print(f"Saved metadata to {Path(paths['hidden']) / 'metadata.csv'}")
+    extraction_manifest = {
+        "model": model_name,
+        "rows": len(meta_rows),
+        "layers": int(sentence_last_vectors.shape[1]),
+        "hidden_dim": int(sentence_last_vectors.shape[2]),
+        "truncated_inputs": int(truncated),
+        "elapsed_seconds": elapsed,
+        "peak_allocated_gpu_gib": peak_gpu_gb,
+        "torch_version": torch.__version__,
+    }
+    (Path(paths["output"]) / "extraction_manifest.json").write_text(
+        json.dumps(extraction_manifest, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":

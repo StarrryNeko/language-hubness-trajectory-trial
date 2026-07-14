@@ -27,6 +27,10 @@ Inspect:
 - `figures/language_neighborhood_purity.png`
 - `figures/centroid_separation_by_layer.png`
 - `metrics/validation_report.txt`
+- `metrics/research_summary.txt`
+- `metrics/pooling_robustness_summary.csv`
+- `figures/re_separation_strength.png`
+- `figures/pooling_robustness_summary.png`
 
 Decision rules:
 
@@ -34,6 +38,13 @@ Decision rules:
 - English-specific proximity requires English to beat the rotated pseudo-anchors.
 - English hubness requires English neighbor share above the balanced candidate baseline.
 - Re-separation requires late recovery of neighborhood purity; centroid separation is supporting evidence.
+
+Bootstrap confidence intervals are computed over semantic samples. For optional
+kNN robustness after the main run:
+
+```bash
+python src/sweep_k.py --config configs/qwen25_1_5b_mvp.json --k-values 5 10 20
+```
 
 ## Optional Phase 2: Token-Level Diagnostics
 
