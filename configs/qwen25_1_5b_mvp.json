@@ -19,7 +19,10 @@
     }
   },
   "data_validation": {
-    "fail_on_known_suspicious_suffix": true
+    "known_suffix_policy": "replace",
+    "known_suffix_replacements": {
+      ".x": "."
+    }
   },
   "metrics": {
     "english_language": "en",

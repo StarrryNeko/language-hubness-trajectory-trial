@@ -18,6 +18,37 @@ def pick_sentence(row):
     raise KeyError(f"Cannot find sentence field in row keys: {list(row.keys())}")
 
 
+def apply_known_suffix_policy(rows, validation_cfg):
+    policy = validation_cfg.get("known_suffix_policy", "error")
+    replacements = validation_cfg.get("known_suffix_replacements", {".x": "."})
+    if policy not in {"error", "warn", "replace"}:
+        raise ValueError("data_validation.known_suffix_policy must be error, warn, or replace")
+
+    processed = []
+    audit = []
+    for source_row in rows:
+        row = dict(source_row)
+        text = str(row["text"])
+        for suffix, replacement in replacements.items():
+            if text.endswith(suffix):
+                cleaned = text[: -len(suffix)] + replacement if suffix else text
+                audit.append({
+                    "id": row["id"],
+                    "lang": row["lang"],
+                    "matched_suffix": suffix,
+                    "replacement": replacement,
+                    "original_text": text,
+                    "cleaned_text": cleaned,
+                })
+                if policy == "replace":
+                    row["source_text"] = text
+                    row["text"] = cleaned
+                    row["data_cleaning"] = f"terminal suffix {suffix!r} replaced with {replacement!r}"
+                break
+        processed.append(row)
+    return processed, audit, policy, replacements
+
+
 def validate_parallel_rows(rows, expected_languages):
     groups = {}
     duplicate_keys = 0
@@ -97,11 +128,23 @@ def main():
                         "text": pick_sentence(row),
                     }
                 )
-        write_jsonl(str(out_path), rows)
-        print(f"Wrote {len(rows)} rows to {out_path}")
+    data_validation_cfg = cfg.get("data_validation", {})
+    rows, cleaning_audit, suffix_policy, suffix_replacements = apply_known_suffix_policy(
+        rows, data_validation_cfg
+    )
+    write_jsonl(str(out_path), rows)
+    print(f"Wrote {len(rows)} rows to {out_path}")
 
     manifest = validate_parallel_rows(rows, list(languages))
-    manifest.update({"source": source, "split": split, "output": str(out_path)})
+    manifest.update({
+        "source": source,
+        "split": split,
+        "output": str(out_path),
+        "known_suffix_policy": suffix_policy,
+        "known_suffix_replacements": suffix_replacements,
+        "source_rows_matching_known_suffix": len(cleaning_audit),
+        "suffix_cleaning_audit": cleaning_audit,
+    })
     manifest_path = Path(paths["data"]) / "dataset_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print("\n=== Dataset validation ===")
@@ -109,12 +152,13 @@ def main():
     print(f"Rows per language: {manifest['rows_per_language']}")
     print(f"Duplicate within-language texts: {manifest['duplicate_within_language_texts']}")
     print(f"Known suspicious suffixes: {manifest['known_suspicious_suffix_count']}")
+    print(f"Source rows matching configured suffixes: {len(cleaning_audit)} (policy={suffix_policy})")
     print(f"Alphanumeric terminal rows: {manifest['alphanumeric_terminal_count']}")
     print(f"Saved {manifest_path}")
-    data_validation_cfg = cfg.get("data_validation", {})
-    if data_validation_cfg.get("fail_on_known_suspicious_suffix", True) and manifest["known_suspicious_suffix_count"]:
+    if suffix_policy == "error" and cleaning_audit:
         raise ValueError(
-            "Known suspicious terminal suffixes were found. Inspect dataset_manifest.json before extraction."
+            "Known suspicious terminal suffixes were found. Inspect dataset_manifest.json or use the "
+            "audited 'replace' policy after confirming the configured replacements."
         )
 
 

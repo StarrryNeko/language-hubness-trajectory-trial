@@ -125,6 +125,9 @@ def validate_dataset(paths, cfg):
             f"Manifest source/split: {None if manifest is None else manifest.get('source')}/"
             f"{None if manifest is None else manifest.get('split')}",
             f"Known suspicious suffix count: {None if manifest is None else manifest.get('known_suspicious_suffix_count')}",
+            f"Source rows cleaned by configured suffix policy: "
+            f"{None if manifest is None else manifest.get('source_rows_matching_known_suffix')}",
+            f"Suffix policy: {None if manifest is None else manifest.get('known_suffix_policy')}",
         ],
         "The dataset is structurally suitable for parallel-sentence comparisons." if passed else
         "Dataset structure can bias or invalidate downstream comparisons.",
