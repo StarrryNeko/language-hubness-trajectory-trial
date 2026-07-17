@@ -4,7 +4,8 @@ This project is a small, executable MVP for studying layer-wise language central
 
 Core idea:
 
-> Track whether non-English representations drift toward an English hub across model layers, and identify absorption / peak / correction layers.
+> Track whether non-English representations drift toward English across model layers, distinguish
+> neighbor-language attraction from point-level hubness, and test late language re-separation.
 
 The first target model is `Qwen/Qwen2.5-1.5B` on a CUDA 12.1 PyTorch environment.
 
@@ -48,12 +49,22 @@ From this project folder:
 python src/run_pilot.py --config configs/qwen25_1_5b_mvp.json
 ```
 
+To print the source sentence and terminal-token audit for every saved hidden-state row during extraction:
+
+```bash
+python src/run_pilot.py --config configs/qwen25_1_5b_mvp.json --show-sentences all
+```
+
 The unified runner stops immediately if any stage fails. To rerun metrics and
 figures without loading the model again:
 
 ```bash
 python src/run_pilot.py --config configs/qwen25_1_5b_mvp.json --skip-prepare --skip-extract
 ```
+
+Use the skip flags only when `data/dataset_manifest.json`, `extraction_manifest.json`, and the
+config snapshot belong to the same run. An official rerun should not reuse unmanifested toy or
+copied output directories.
 
 The equivalent individual commands are:
 
@@ -62,6 +73,8 @@ python src/prepare_flores.py --config configs/qwen25_1_5b_mvp.json
 python src/extract_hidden.py --config configs/qwen25_1_5b_mvp.json
 python src/compute_metrics.py --config configs/qwen25_1_5b_mvp.json
 python src/plot_trajectories.py --config configs/qwen25_1_5b_mvp.json
+python src/sweep_k.py --config configs/qwen25_1_5b_mvp.json --k-values 5 10 20
+python src/run_validations.py --config configs/qwen25_1_5b_mvp.json
 ```
 
 If the cloud machine cannot reach HuggingFace, first try a mirror:
@@ -87,17 +100,37 @@ outputs/qwen25_1_5b_mvp/
   hidden/
   metrics/
   figures/
+  validation/
 ```
 
-The extraction step saves both `last_token` (primary) and `mean_pool` sentence
-representations in one model pass. The metric step performs validation and the
-pilot analysis together, so there is no second model run.
+The extraction step saves five representations in one model pass:
 
-After `compute_metrics.py`, inspect the terminal report or:
+- `last_token`: the original final non-padding token; this often is punctuation.
+- `last_content_token`: the final token containing a Unicode letter, number, or mark.
+- `shared_sentinel`: one identical EOS/sentinel token appended to every language after the sentence.
+- `mean_pool`: the original all-token mean, excluding the appended sentinel.
+- `content_mean_pool`: a mean over content-bearing tokens only.
+
+`hidden/metadata.csv` and `hidden/hidden_state_sentence_index.jsonl` map every vector row back to
+its source sentence, complete token sequence, original last token, last content token, and sentinel.
+Use the inspector without loading the model again:
+
+```bash
+python src/inspect_hidden_states.py \
+  --config configs/qwen25_1_5b_mvp.json \
+  --rows 0,200,400,600 --layers 0,16,28 --show-token-sequence
+```
+
+After the unified run, begin with:
 
 ```text
-outputs/qwen25_1_5b_mvp/metrics/validation_report.txt
+outputs/qwen25_1_5b_mvp/validation/validation_summary.md
 ```
+
+The numbered files in `validation/` preserve each validation question separately: dataset,
+sentence/token audit, hidden integrity, semantics, English specificity, attraction/hubness,
+re-separation, representation robustness, and k robustness. Each report records the method,
+evidence, interpretation, and any required action.
 
 Bootstrap confidence intervals, automatic claim verdicts, and pooling summaries
 are written to:
@@ -126,7 +159,9 @@ alignment_gain_by_layer.png
 similarity_sanity_check.png
 semantic_retrieval_recall1.png
 anchor_specificity_by_layer.png
+english_specificity_contrasts.png
 english_hub_attraction_by_layer.png
+hubness_occurrence_by_layer.png
 language_neighborhood_purity.png
 centroid_separation_by_layer.png
 re_separation_strength.png
@@ -145,7 +180,10 @@ Use the first plots to answer:
 
 ## Important Notes
 
-- The primary representation is the final non-padding token because it has seen the full left context. Mean pooling is saved as a robustness check.
+- The raw final token remains the historical baseline because a causal decoder's final position has seen
+  the full left context. The updated Qwen pilot uses `shared_sentinel` as its configured primary
+  representation and treats raw final-token results as a control. Final-content-token and shared-sentinel
+  results must agree before a terminal-token-sensitive claim is treated as robust.
 - Hidden states are contextual representations, not pure semantic outputs. Parallel retrieval and shuffled baselines test whether they carry usable sentence semantics.
 - Keep the first run small: 100-300 sentences per language.
 - Do not save every token from every sentence at first; hidden state files grow quickly.

@@ -1,6 +1,7 @@
 import argparse
 import json
 import shutil
+import unicodedata
 from pathlib import Path
 
 from datasets import load_dataset
@@ -28,6 +29,15 @@ def validate_parallel_rows(rows, expected_languages):
         groups.setdefault(str(row["id"]), set()).add(str(row["lang"]))
     incomplete = [semantic_id for semantic_id, langs in groups.items() if langs != set(expected_languages)]
     duplicate_texts = len(rows) - len({(str(row["lang"]), row["text"]) for row in rows})
+    suspicious_suffix_rows = []
+    alphanumeric_terminal_rows = []
+    for row in rows:
+        text = str(row["text"]).rstrip()
+        terminal = text[-1] if text else ""
+        if text.endswith(".x"):
+            suspicious_suffix_rows.append({"id": row["id"], "lang": row["lang"], "text": row["text"]})
+        if terminal and unicodedata.category(terminal)[0] in {"L", "N"}:
+            alphanumeric_terminal_rows.append({"id": row["id"], "lang": row["lang"], "text": row["text"]})
     if duplicate_keys or incomplete:
         raise ValueError(
             f"Invalid parallel data: duplicate keys={duplicate_keys}, incomplete semantic groups={len(incomplete)}"
@@ -40,6 +50,10 @@ def validate_parallel_rows(rows, expected_languages):
             lang: sum(str(row["lang"]) == lang for row in rows) for lang in expected_languages
         },
         "duplicate_within_language_texts": duplicate_texts,
+        "known_suspicious_suffix_count": len(suspicious_suffix_rows),
+        "known_suspicious_suffix_examples": suspicious_suffix_rows[:20],
+        "alphanumeric_terminal_count": len(alphanumeric_terminal_rows),
+        "alphanumeric_terminal_examples": alphanumeric_terminal_rows[:20],
         "complete_parallel_groups": True,
     }
 
@@ -94,7 +108,14 @@ def main():
     print(f"Complete semantic groups: {manifest['semantic_groups']}")
     print(f"Rows per language: {manifest['rows_per_language']}")
     print(f"Duplicate within-language texts: {manifest['duplicate_within_language_texts']}")
+    print(f"Known suspicious suffixes: {manifest['known_suspicious_suffix_count']}")
+    print(f"Alphanumeric terminal rows: {manifest['alphanumeric_terminal_count']}")
     print(f"Saved {manifest_path}")
+    data_validation_cfg = cfg.get("data_validation", {})
+    if data_validation_cfg.get("fail_on_known_suspicious_suffix", True) and manifest["known_suspicious_suffix_count"]:
+        raise ValueError(
+            "Known suspicious terminal suffixes were found. Inspect dataset_manifest.json before extraction."
+        )
 
 
 if __name__ == "__main__":

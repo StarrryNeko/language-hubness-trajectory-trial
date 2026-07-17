@@ -42,6 +42,36 @@ def main():
 
     primary = cfg["metrics"].get("primary_representation", "last_token")
     plot_data = summary[summary.representation == primary]
+    max_layer = max(
+        1,
+        int(pd.read_csv(Path(paths["metrics"]) / f"k{args.k_values[0]}" / "alignment_gain.csv").layer.max()),
+    )
+    same_claims = all(
+        plot_data[column].nunique(dropna=False) == 1
+        for column in [
+            "retrieval_directions_above_random_ci",
+            "english_hub_supported_languages",
+            "languages_with_positive_re_separation_ci",
+        ]
+    )
+    specificity_support = (
+        plot_data.english_specificity_longest_run >= int(cfg["metrics"].get("min_consecutive_layers", 3))
+    )
+    same_claims = same_claims and specificity_support.nunique(dropna=False) == 1
+    peak_stability = all(
+        (plot_data[column].max() - plot_data[column].min()) / max_layer <= 0.25
+        for column in ["alignment_peak_layer", "retrieval_peak_layer", "english_hub_peak_layer"]
+    )
+    k_status = "CONSISTENT" if same_claims and peak_stability else "SENSITIVE"
+    verdict = pd.DataFrame([{
+        "primary_representation": primary,
+        "k_values": ",".join(map(str, sorted(plot_data.k.unique()))),
+        "status": k_status,
+        "same_claim_support": bool(same_claims),
+        "peak_layer_stable_within_25pct": bool(peak_stability),
+    }])
+    verdict_path = Path(paths["metrics"]) / "k_robustness_verdict.csv"
+    verdict.to_csv(verdict_path, index=False, encoding="utf-8")
     long = plot_data.melt(
         id_vars=["k"],
         value_vars=["english_hub_peak", "mean_re_separation_strength"],
@@ -56,6 +86,7 @@ def main():
     plt.savefig(figure_path, dpi=180)
     plt.close()
     print(f"Saved {summary_path}")
+    print(f"Saved {verdict_path} ({k_status})")
     print(f"Saved {figure_path}")
 
 

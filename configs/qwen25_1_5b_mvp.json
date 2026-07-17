@@ -18,13 +18,41 @@
       "ha": "hau_Latn"
     }
   },
+  "data_validation": {
+    "fail_on_known_suspicious_suffix": true
+  },
   "metrics": {
     "english_language": "en",
     "nearest_neighbors_k": 10,
-    "representations": ["last_token", "mean_pool"],
-    "primary_representation": "last_token",
+    "representations": [
+      "last_token",
+      "last_content_token",
+      "shared_sentinel",
+      "mean_pool",
+      "content_mean_pool"
+    ],
+    "primary_representation": "shared_sentinel",
     "bootstrap_samples": 500,
-    "confidence_level": 0.95
+    "confidence_level": 0.95,
+    "shuffled_permutations": 20,
+    "min_consecutive_layers": 3,
+    "reseparation_windows": {
+      "exclude_layers": [0],
+      "early": [1, 8],
+      "mid": [9, 17],
+      "late": [22, 28]
+    }
+  },
+  "representation_controls": {
+    "append_shared_sentinel": true
+  },
+  "hidden_state_audit": {
+    "display_sentences": "preview",
+    "preview_per_language": 3
+  },
+  "robustness": {
+    "run_k_sweep_in_full_pipeline": true,
+    "k_values": [5, 10, 20]
   },
   "token_export": {
     "enabled": false,

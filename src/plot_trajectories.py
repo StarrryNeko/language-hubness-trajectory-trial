@@ -58,6 +58,14 @@ def main():
              path, ci_lower="ci_lower", ci_upper="ci_upper")
     generated.append(path)
 
+    specificity_contrasts = pd.read_csv(metrics / "anchor_specificity_contrasts.csv")
+    contrast_plot = specificity_contrasts[specificity_contrasts.representation == primary]
+    path = figures / "english_specificity_contrasts.png"
+    lineplot(contrast_plot, "english_minus_pseudo", "pseudo_anchor",
+             "English Specificity Minus Each Pseudo-anchor", "English - pseudo specificity",
+             path, baseline=0.0, ci_lower="ci_lower", ci_upper="ci_upper")
+    generated.append(path)
+
     specificity = pd.read_csv(metrics / "anchor_specificity_summary.csv")
     spec_plot = specificity[specificity.representation == primary]
     path = figures / "anchor_specificity_by_layer.png"
@@ -70,10 +78,18 @@ def main():
     en_neighbors = neighbors[(neighbors.representation == primary) & (neighbors.neighbor_lang == english)]
     path = figures / "english_hub_attraction_by_layer.png"
     lineplot(en_neighbors, "neighbor_rate", "query_lang",
-             "English Cross-lingual Hub Attraction", "Share of English neighbors",
+             "English Cross-lingual Neighbor Attraction", "Share of English neighbors",
              path,
              baseline=float(en_neighbors.uniform_baseline.iloc[0]),
              ci_lower="ci_lower", ci_upper="ci_upper")
+    generated.append(path)
+
+    occurrence = pd.read_csv(metrics / "hubness_occurrence.csv")
+    occurrence_plot = occurrence[occurrence.representation == primary]
+    path = figures / "hubness_occurrence_by_layer.png"
+    lineplot(occurrence_plot, "mean_k_occurrence", "candidate_lang",
+             "Classical Cross-lingual k-occurrence Hubness", "Mean k-occurrence",
+             path, ci_lower="ci_lower", ci_upper="ci_upper")
     generated.append(path)
 
     purity = pd.read_csv(metrics / "language_neighborhood_purity.csv")
@@ -99,7 +115,7 @@ def main():
     plt.axhline(0, color="black", linestyle="--", linewidth=1)
     plt.title("Late Language Re-separation Strength")
     plt.xlabel("Language")
-    plt.ylabel("Final purity - minimum purity")
+    plt.ylabel("Late-window purity - mid-window purity")
     plt.tight_layout()
     plt.savefig(path, dpi=180)
     plt.close()
