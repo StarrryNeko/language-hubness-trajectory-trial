@@ -1,0 +1,99 @@
+{
+  "seed": 42,
+  "device": "cuda",
+  "dtype": "float16",
+  "storage_dtype": "float16",
+  "huggingface_cache_dir": "/root/autodl-tmp/huggingface",
+  "max_length": 128,
+  "batch_size": 1,
+  "dataset": {
+    "source": "flores_plus",
+    "dataset_name": "openlanguagedata/flores_plus",
+    "split": "dev",
+    "sample_size_per_language": 100,
+    "minimum_languages_per_semantic_group": 20,
+    "languages": {
+      "en": "eng_Latn",
+      "zh": "zho_Hans",
+      "de": "deu_Latn",
+      "ar": "arb_Arab",
+      "hi": "hin_Deva",
+      "es": "spa_Latn",
+      "fr": "fra_Latn",
+      "ru": "rus_Cyrl",
+      "ja": "jpn_Jpan",
+      "ko": "kor_Hang",
+      "sw": "swh_Latn",
+      "tr": "tur_Latn",
+      "vi": "vie_Latn",
+      "th": "tha_Thai",
+      "id": "ind_Latn",
+      "fi": "fin_Latn",
+      "el": "ell_Grek",
+      "ta": "tam_Taml",
+      "te": "tel_Telu",
+      "bn": "ben_Beng",
+      "ur": "urd_Arab",
+      "bg": "bul_Cyrl",
+      "it": "ita_Latn",
+      "pt": "por_Latn"
+    },
+    "language_metadata": {
+      "en": {"family": "Germanic", "script": "Latin"},
+      "zh": {"family": "Sinitic", "script": "Han"},
+      "de": {"family": "Germanic", "script": "Latin"},
+      "ar": {"family": "Semitic", "script": "Arabic"},
+      "hi": {"family": "Indo-Aryan", "script": "Devanagari"},
+      "es": {"family": "Romance", "script": "Latin"},
+      "fr": {"family": "Romance", "script": "Latin"},
+      "ru": {"family": "Slavic", "script": "Cyrillic"},
+      "ja": {"family": "Japonic", "script": "Japanese"},
+      "ko": {"family": "Koreanic", "script": "Hangul"},
+      "sw": {"family": "Bantu", "script": "Latin"},
+      "tr": {"family": "Turkic", "script": "Latin"},
+      "vi": {"family": "Austroasiatic", "script": "Latin"},
+      "th": {"family": "Kra-Dai", "script": "Thai"},
+      "id": {"family": "Austronesian", "script": "Latin"},
+      "fi": {"family": "Uralic", "script": "Latin"},
+      "el": {"family": "Hellenic", "script": "Greek"},
+      "ta": {"family": "Dravidian", "script": "Tamil"},
+      "te": {"family": "Dravidian", "script": "Telugu"},
+      "bn": {"family": "Indo-Aryan", "script": "Bengali"},
+      "ur": {"family": "Indo-Aryan", "script": "Arabic"},
+      "bg": {"family": "Slavic", "script": "Cyrillic"},
+      "it": {"family": "Romance", "script": "Latin"},
+      "pt": {"family": "Romance", "script": "Latin"}
+    }
+  },
+  "data_validation": {
+    "known_suffix_policy": "replace",
+    "known_suffix_replacements": {".x": "."}
+  },
+  "metrics": {
+    "english_language": "en",
+    "nearest_neighbors_k": 5,
+    "representations": ["mean_pool", "sentinel_eos"],
+    "primary_representation": "mean_pool",
+    "validation_representation": "sentinel_eos",
+    "bootstrap_samples": 500,
+    "confidence_level": 0.95,
+    "min_consecutive_layers": 3
+  },
+  "representation_controls": {
+    "append_sentinel_eos": true,
+    "prepend_bos_when_available": true
+  },
+  "similarity_controls": {
+    "methods": ["cosine", "local_scaled_cosine"],
+    "local_scaling_k": 5
+  },
+  "hidden_state_audit": {
+    "display_sentences": "preview",
+    "preview_per_language": 1
+  },
+  "robustness": {
+    "run_k_sweep_in_full_pipeline": true,
+    "k_values": [1, 3, 5, 10]
+  },
+  "token_export": {"enabled": false}
+}

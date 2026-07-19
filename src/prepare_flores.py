@@ -7,7 +7,14 @@ from pathlib import Path
 from datasets import load_dataset
 from tqdm import tqdm
 
-from common import ensure_dirs, load_config, read_jsonl, set_seed, write_jsonl
+from common import (
+    ensure_dirs,
+    load_config,
+    read_jsonl,
+    set_seed,
+    validate_language_inventory,
+    write_jsonl,
+)
 
 
 def pick_sentence(row):
@@ -86,6 +93,8 @@ def validate_parallel_rows(rows, expected_languages):
         "alphanumeric_terminal_count": len(alphanumeric_terminal_rows),
         "alphanumeric_terminal_examples": alphanumeric_terminal_rows[:20],
         "complete_parallel_groups": True,
+        "candidate_scope": "same_semantic_id_only",
+        "languages_per_semantic_group": len(expected_languages),
     }
 
 
@@ -95,6 +104,7 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    validate_language_inventory(cfg)
     set_seed(cfg.get("seed", 42))
     paths = ensure_dirs(cfg)
 
@@ -115,8 +125,16 @@ def main():
         print(f"Copied local dataset from {input_path} to {out_path}")
     else:
         rows = []
+        dataset_name = dataset_cfg.get(
+            "dataset_name",
+            "openlanguagedata/flores_plus" if source == "flores_plus" else "facebook/flores",
+        )
+        cache_dir = dataset_cfg.get("cache_dir", cfg.get("huggingface_cache_dir"))
         for short_lang, flores_lang in tqdm(languages.items(), desc="Loading FLORES languages"):
-            ds = load_dataset("facebook/flores", flores_lang, split=split)
+            load_kwargs = {"split": split}
+            if cache_dir:
+                load_kwargs["cache_dir"] = cache_dir
+            ds = load_dataset(dataset_name, flores_lang, **load_kwargs)
             limit = min(sample_size, len(ds))
             for idx in range(limit):
                 row = ds[idx]
@@ -138,6 +156,8 @@ def main():
     manifest = validate_parallel_rows(rows, list(languages))
     manifest.update({
         "source": source,
+        "dataset_name": dataset_cfg.get("dataset_name"),
+        "huggingface_cache_dir": dataset_cfg.get("cache_dir", cfg.get("huggingface_cache_dir")),
         "split": split,
         "output": str(out_path),
         "known_suffix_policy": suffix_policy,

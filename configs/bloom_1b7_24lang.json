@@ -1,0 +1,9 @@
+{
+  "extends": "base_24lang_same_semantics.json",
+  "experiment_name": "bloom_1b7_24lang",
+  "model": {
+    "name_or_path": "bigscience/bloom-1b7",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs/bloom_1b7_24lang"
+}

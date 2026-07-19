@@ -1,0 +1,8 @@
+{
+  "configs": [
+    "qwen25_1_5b_mvp.json",
+    "bloom_1b7_24lang.json",
+    "xglm_1b7_24lang.json"
+  ],
+  "comparison_output_dir": "outputs/model_comparison_24lang"
+}

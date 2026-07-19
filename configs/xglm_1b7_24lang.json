@@ -1,0 +1,9 @@
+{
+  "extends": "base_24lang_same_semantics.json",
+  "experiment_name": "xglm_1b7_24lang",
+  "model": {
+    "name_or_path": "facebook/xglm-1.7B",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs/xglm_1b7_24lang"
+}

@@ -8,26 +8,9 @@ import seaborn as sns
 from common import ensure_dirs, load_config
 
 
-def lineplot(data, y, hue, title, ylabel, output, baseline=None, style=None,
-             ci_lower=None, ci_upper=None):
-    plt.figure(figsize=(10, 6))
-    hue_order = sorted(data[hue].unique())
-    palette = sns.color_palette(n_colors=len(hue_order))
-    sns.lineplot(data=data, x="layer", y=y, hue=hue, hue_order=hue_order,
-                 palette=palette, style=style, errorbar=None)
-    if ci_lower and ci_upper and ci_lower in data.columns and ci_upper in data.columns:
-        for color, label in zip(palette, hue_order):
-            group = data[data[hue] == label].sort_values("layer")
-            plt.fill_between(group["layer"].to_numpy(), group[ci_lower].to_numpy(),
-                             group[ci_upper].to_numpy(), color=color, alpha=0.15)
-    if baseline is not None:
-        plt.axhline(baseline, color="black", linestyle="--", linewidth=1, label="uniform baseline")
-    plt.title(title)
-    plt.xlabel("Layer")
-    plt.ylabel(ylabel)
-    plt.grid(alpha=0.25)
+def save(path):
     plt.tight_layout()
-    plt.savefig(output, dpi=180)
+    plt.savefig(path, dpi=180)
     plt.close()
 
 
@@ -41,137 +24,106 @@ def main():
     metrics = Path(paths["metrics"])
     figures = Path(paths["figures"])
     if args.result_tag:
-        metrics = metrics / args.result_tag
-        figures = figures / args.result_tag
+        metrics /= args.result_tag
+        figures /= args.result_tag
         figures.mkdir(parents=True, exist_ok=True)
-    primary = cfg["metrics"].get("primary_representation", "last_token")
+    primary = cfg["metrics"].get("primary_representation", "mean_pool")
     english = cfg["metrics"].get("english_language", "en")
     sns.set_theme(style="whitegrid")
-
-    alignment = pd.read_csv(metrics / "alignment_gain.csv")
-    alignment["pair"] = alignment["lang_a"] + "-" + alignment["lang_b"]
     generated = []
 
-    path = figures / "alignment_gain_by_layer.png"
-    lineplot(alignment[alignment.representation == primary], "alignment_gain", "pair",
-             "Cross-lingual Semantic Alignment", "Parallel cosine - shuffled cosine",
-             path, ci_lower="ci_lower", ci_upper="ci_upper")
-    generated.append(path)
-
-    specificity_contrasts = pd.read_csv(metrics / "anchor_specificity_contrasts.csv")
-    contrast_plot = specificity_contrasts[specificity_contrasts.representation == primary]
-    path = figures / "english_specificity_contrasts.png"
-    lineplot(contrast_plot, "english_minus_pseudo", "pseudo_anchor",
-             "English Specificity Minus Each Pseudo-anchor", "English - pseudo specificity",
-             path, baseline=0.0, ci_lower="ci_lower", ci_upper="ci_upper")
-    generated.append(path)
-
-    specificity = pd.read_csv(metrics / "anchor_specificity_summary.csv")
-    spec_plot = specificity[specificity.representation == primary]
-    path = figures / "anchor_specificity_by_layer.png"
-    lineplot(spec_plot, "mean_specificity", "anchor_lang",
-             "Anchor-language Specificity (English Must Beat Pseudo-anchors)", "Specificity",
-             path, baseline=0.0, ci_lower="ci_lower", ci_upper="ci_upper")
-    generated.append(path)
-
-    neighbors = pd.read_csv(metrics / "neighbor_direction_matrix.csv")
-    en_neighbors = neighbors[(neighbors.representation == primary) & (neighbors.neighbor_lang == english)]
-    path = figures / "english_hub_attraction_by_layer.png"
-    lineplot(en_neighbors, "neighbor_rate", "query_lang",
-             "English Cross-lingual Neighbor Attraction", "Share of English neighbors",
-             path,
-             baseline=float(en_neighbors.uniform_baseline.iloc[0]),
-             ci_lower="ci_lower", ci_upper="ci_upper")
-    generated.append(path)
-
-    occurrence = pd.read_csv(metrics / "hubness_occurrence.csv")
-    occurrence_plot = occurrence[occurrence.representation == primary]
-    path = figures / "hubness_occurrence_by_layer.png"
-    lineplot(occurrence_plot, "mean_k_occurrence", "candidate_lang",
-             "Classical Cross-lingual k-occurrence Hubness", "Mean k-occurrence",
-             path, ci_lower="ci_lower", ci_upper="ci_upper")
-    generated.append(path)
-
-    purity = pd.read_csv(metrics / "language_neighborhood_purity.csv")
-    purity_plot = purity[purity.representation == primary]
-    path = figures / "language_neighborhood_purity.png"
-    lineplot(purity_plot, "neighborhood_purity", "lang",
-             "Language Neighborhood Purity and Re-separation", "Same-language neighbor share",
-             path,
-             baseline=float(purity_plot.uniform_baseline.iloc[0]),
-             ci_lower="ci_lower", ci_upper="ci_upper")
-    generated.append(path)
-
-    reseparation = pd.read_csv(metrics / "re_separation_summary.csv")
-    reseparation_plot = reseparation[reseparation.representation == primary].sort_values("lang")
-    path = figures / "re_separation_strength.png"
-    plt.figure(figsize=(8, 5))
-    yerr = [
-        reseparation_plot["re_separation_strength"] - reseparation_plot["ci_lower"],
-        reseparation_plot["ci_upper"] - reseparation_plot["re_separation_strength"],
+    evidence = pd.read_csv(metrics / "english_hubness_evidence.csv")
+    evidence = evidence[
+        (evidence.representation == primary) & (evidence.similarity_method == "cosine")
     ]
-    plt.bar(reseparation_plot["lang"], reseparation_plot["re_separation_strength"],
-            yerr=yerr, capsize=4)
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True)
+    for ax, (metric, group) in zip(axes.flat, evidence.groupby("metric", sort=True)):
+        group = group.sort_values("layer")
+        ax.plot(group.layer, group["mean"], marker="o", markersize=2)
+        ax.fill_between(group.layer, group.ci_lower, group.ci_upper, alpha=0.2)
+        ax.axhline(0, color="black", linestyle="--", linewidth=1)
+        ax.set_title(metric.replace("_", " ").title())
+        ax.set_ylabel("English minus balanced alternative")
+    fig.suptitle("English Hubness: Complementary Same-semantics Evidence")
+    generated.append(figures / "english_hubness_evidence.png")
+    save(generated[-1])
+
+    by_language = pd.read_csv(metrics / "hubness_by_language.csv")
+    by_language = by_language[
+        (by_language.representation == primary)
+        & (by_language.similarity_method == "cosine")
+        & (by_language.metric == "k_occurrence")
+    ]
+    plt.figure(figsize=(12, 7))
+    sns.lineplot(data=by_language, x="layer", y="mean", hue="candidate_lang", errorbar=None)
+    plt.axhline(int(cfg["metrics"].get("nearest_neighbors_k", 5)), color="black", linestyle="--")
+    plt.title("Within-semantics Reverse-kNN Occurrence by Language")
+    plt.ylabel("Mean number of source languages selecting candidate")
+    plt.legend(ncol=3, fontsize=8)
+    generated.append(figures / "hubness_occurrence_by_language.png")
+    save(generated[-1])
+
+    controls = by_language = pd.read_csv(metrics / "english_hubness_evidence.csv")
+    controls = controls[
+        (controls.representation.isin([primary, cfg["metrics"].get("validation_representation", "sentinel_eos")]))
+        & (controls.metric == "k_occurrence_excess")
+    ]
+    controls["control"] = controls.representation + " / " + controls.similarity_method
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=controls, x="layer", y="mean", hue="control", marker="o", errorbar=None)
     plt.axhline(0, color="black", linestyle="--", linewidth=1)
-    plt.title("Late Language Re-separation Strength")
-    plt.xlabel("Language")
-    plt.ylabel("Late-window purity - mid-window purity")
-    plt.tight_layout()
-    plt.savefig(path, dpi=180)
-    plt.close()
-    generated.append(path)
+    plt.title("English Hubness under EOS and Local-density Controls")
+    plt.ylabel("English k-occurrence minus balanced expectation")
+    generated.append(figures / "english_hubness_controls.png")
+    save(generated[-1])
 
-    centroid = pd.read_csv(metrics / "centroid_separation.csv")
-    representation_count = centroid.representation.nunique()
-    path = figures / "centroid_separation_by_layer.png"
-    lineplot(centroid, "centroid_separation", "representation",
-             "Language Centroid Separation (Pooling Robustness)", "Mean centroid cosine distance",
-             path)
-    generated.append(path)
-
-    sanity = pd.read_csv(metrics / "sanity_checks.csv")
-    sanity_long = sanity.melt(
-        id_vars=["representation", "layer"],
-        value_vars=["parallel_similarity", "shuffled_similarity"],
-        var_name="comparison", value_name="cosine_similarity"
-    )
-    path = figures / "similarity_sanity_check.png"
-    lineplot(sanity_long, "cosine_similarity", "comparison",
-             "Similarity Sanity Check", "Mean cosine similarity",
-             path, style="representation" if representation_count > 1 else None)
-    generated.append(path)
-
-    retrieval = pd.read_csv(metrics / "semantic_retrieval.csv")
-    retrieval["pair"] = retrieval["query_lang"] + "->" + retrieval["target_lang"]
-    path = figures / "semantic_retrieval_recall1.png"
-    lineplot(retrieval[retrieval.representation == primary], "recall_at_1", "pair",
-             "Cross-lingual Parallel-sentence Retrieval", "Recall@1",
-             path, ci_lower="recall1_ci_lower", ci_upper="recall1_ci_upper")
-    generated.append(path)
-
-    pooling = pd.read_csv(metrics / "pooling_robustness_summary.csv")
-    path = figures / "pooling_robustness_summary.png"
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
-    panels = [
-        ("alignment_peak", "Alignment peak"),
-        ("retrieval_peak_recall1", "Peak Recall@1"),
-        ("english_specificity_peak", "English specificity peak"),
-        ("mean_re_separation_strength", "Mean re-separation strength"),
+    source = pd.read_csv(metrics / "english_source_group_attraction.csv")
+    source = source[
+        (source.representation == primary) & (source.similarity_method == "cosine")
     ]
-    for ax, (column, title) in zip(axes.flat, panels):
-        sns.barplot(data=pooling, x="representation", y=column, ax=ax)
-        ax.set_title(title)
-        ax.set_xlabel("")
-    fig.suptitle("Pooling Robustness Summary")
-    fig.tight_layout()
-    fig.savefig(path, dpi=180)
-    plt.close(fig)
-    generated.append(path)
+    script = source.groupby(["layer", "source_script"], as_index=False).agg(
+        mean=("mean", "mean"), baseline=("balanced_selection_baseline", "mean")
+    )
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=script, x="layer", y="mean", hue="source_script", errorbar=None)
+    plt.axhline(float(script.baseline.iloc[0]), color="black", linestyle="--")
+    plt.title("Breadth of English Attraction across Source Scripts")
+    plt.ylabel("P(English is in same-semantics top-k)")
+    plt.legend(ncol=2, fontsize=8)
+    generated.append(figures / "english_attraction_by_source_script.png")
+    save(generated[-1])
 
-    print("\n=== Figure output ===")
+    agreement = pd.read_csv(metrics / "representation_agreement.csv")
+    plt.figure(figsize=(9, 5))
+    sns.lineplot(data=agreement, x="layer", y="pairwise_similarity_pearson", marker="o")
+    plt.axhline(0, color="black", linestyle="--", linewidth=1)
+    plt.ylim(-1.05, 1.05)
+    plt.title("Mean-pool vs Sentinel-EOS Geometry Agreement")
+    plt.ylabel("Pearson r over within-semantics language pairs")
+    generated.append(figures / "representation_agreement.png")
+    save(generated[-1])
+
+    pair = pd.read_csv(metrics / "within_semantic_pair_similarity.csv")
+    pair = pair[pair.representation == primary]
+    aggregate = pair.groupby("layer", as_index=False).agg(
+        mean_similarity=("mean", "mean"), pair_std=("mean", "std")
+    )
+    plt.figure(figsize=(9, 5))
+    plt.plot(aggregate.layer, aggregate.mean_similarity, marker="o", markersize=3)
+    plt.fill_between(
+        aggregate.layer,
+        aggregate.mean_similarity - aggregate.pair_std,
+        aggregate.mean_similarity + aggregate.pair_std,
+        alpha=0.2,
+    )
+    plt.title("Within-semantics Cross-language Cohesion")
+    plt.ylabel("Mean cosine across language pairs")
+    generated.append(figures / "within_semantic_cohesion.png")
+    save(generated[-1])
+
+    print(f"Saved {len(generated)} figures to {figures}")
     for path in generated:
         print(f"- {path.name}")
-    print(f"Saved {len(generated)} figures to {figures}")
 
 
 if __name__ == "__main__":

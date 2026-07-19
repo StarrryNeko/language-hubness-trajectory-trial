@@ -1,209 +1,109 @@
 # Language Hubness Trajectory
 
-This project is a small, executable MVP for studying layer-wise language centralization in multilingual LLMs.
+本项目研究多语言因果语言模型中，英语是否在层间表示空间里成为 hub。当前正式协议只使用：
 
-Core idea:
+- `mean_pool`：主表示；对原句 tokenizer 文本 token 的 hidden state 求均值，不包含额外 BOS/EOS。
+- `sentinel_eos`：验证表示；在每个句子后追加该模型原生 EOS，读取 EOS 位置 hidden state。
 
-> Track whether non-English representations drift toward English across model layers, distinguish
-> neighbor-language attraction from point-level hubness, and test late language re-separation.
+旧版的 `last_token`、`last_content_token`、`shared_sentinel` 和 `content_mean_pool` 不再参与新实验。
 
-The first target model is `Qwen/Qwen2.5-1.5B` on a CUDA 12.1 PyTorch environment.
+模型、tokenizer 与 FLORES+ 的 Hugging Face 缓存统一配置在
+`/root/autodl-tmp/huggingface`，避免占用 AutoDL 系统盘。修改
+`huggingface_cache_dir` 即可切换到其他机器的缓存目录。
 
-## Research Flow
+## 关键实验约束
 
-1. Prepare a small parallel multilingual dataset from FLORES-200.
-2. Extract layer-wise hidden states from Qwen2.5-1.5B.
-3. Validate that the extracted sentence representation carries semantics and that cosine similarity behaves normally.
-4. Compute three core signals:
-   - `AlignmentGain`: parallel-sentence cosine minus a shuffled semantic baseline.
-   - `Anchor Specificity`: whether English is more special than Chinese, German, or Hausa pseudo-anchors.
-   - `Cross-lingual Hub Attraction`: which language occupies balanced cross-language kNN slots.
-5. Measure language re-separation with neighborhood purity and centroid separation.
-6. Plot all validation and research trajectories.
+1. 每个语义 ID 必须包含至少 20 种语言；默认配置使用 24 种语言。
+2. 任何相似度、近邻排序和局部密度校正都只在同一语义 ID 的平行译句中进行。
+3. 不把不同语义的句子作为候选或负例；bootstrap 的抽样单位是语义 ID。
+4. “更接近英语”不等于 hubness。英语 hubness 至少由四类互补的操作化信号共同支持（它们并非统计独立）：
+   - reverse-kNN `k_occurrence_excess`；
+   - 平均图中心性 `centrality_advantage`；
+   - 中心性排名 `rank_percentile_advantage`；
+   - 成为组内 medoid 的频率 `medoid_rate_excess`。
+5. 结论还需通过 sentinel-EOS、局部密度校正、不同 k、来源语系/文字系统覆盖和多模型复现。
 
-## Recommended Cloud Environment
+## 默认语言与模型
 
-- GPU: RTX 3090 24GB or better
-- RAM: 32GB or better
-- OS: Linux / Ubuntu preferred
-- Python: 3.10 or 3.11
-- CUDA: 12.1
+`configs/base_24lang_same_semantics.json` 配置 24 种语言，覆盖 Latin、Han、Arabic、Devanagari、Cyrillic、Japanese、Hangul、Thai、Greek、Tamil、Telugu 和 Bengali 等文字系统。语言集合取自 XGLM 明确列出的训练语言，以减少把“模型从未训练该语言”误当成 hubness 的风险。
 
-Install PyTorch for CUDA 12.1 first:
+首轮三模型套件：
 
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-```
+- Qwen2.5-1.5B
+- BLOOM-1.7B
+- XGLM-1.7B
 
-Then install project dependencies:
+这三者参数量接近，且来自不同模型家族，适合先做快速结构复现；它们不能替代后续更强模型的确认实验。
 
-```bash
-pip install -r requirements.txt
-```
+## 单模型运行
 
-## Quick Start
-
-From this project folder:
+首次准备 FLORES+ 前，需要在 Hugging Face 接受数据集条款并通过 `huggingface-cli login` 登录；也可以把已审核的 24 语言 JSONL 配成 `dataset.source=local_jsonl`，完全离线运行。
 
 ```bash
 python src/run_pilot.py --config configs/qwen25_1_5b_mvp.json
 ```
 
-To print the source sentence and terminal-token audit for every saved hidden-state row during extraction:
-
-```bash
-python src/run_pilot.py --config configs/qwen25_1_5b_mvp.json --show-sentences all
-```
-
-The unified runner stops immediately if any stage fails. To rerun metrics and
-figures without loading the model again:
+只重算指标和图：
 
 ```bash
 python src/run_pilot.py --config configs/qwen25_1_5b_mvp.json --skip-prepare --skip-extract
 ```
 
-Use the skip flags only when `data/dataset_manifest.json`, `extraction_manifest.json`, and the
-config snapshot belong to the same run. An official rerun should not reuse unmanifested toy or
-copied output directories.
-
-The equivalent individual commands are:
-
-```bash
-python src/prepare_flores.py --config configs/qwen25_1_5b_mvp.json
-python src/extract_hidden.py --config configs/qwen25_1_5b_mvp.json
-python src/compute_metrics.py --config configs/qwen25_1_5b_mvp.json
-python src/plot_trajectories.py --config configs/qwen25_1_5b_mvp.json
-python src/sweep_k.py --config configs/qwen25_1_5b_mvp.json --k-values 5 10 20
-python src/run_validations.py --config configs/qwen25_1_5b_mvp.json
-```
-
-If the cloud machine cannot reach HuggingFace, first try a mirror:
-
-```bash
-export HF_ENDPOINT=https://hf-mirror.com
-```
-
-If the machine has no network at all, create a tiny toy dataset to test the rest of the pipeline:
-
-```bash
-python src/make_toy_data.py --config configs/qwen25_1_5b_mvp.json
-python src/extract_hidden.py --config configs/qwen25_1_5b_mvp.json
-python src/compute_metrics.py --config configs/qwen25_1_5b_mvp.json
-python src/plot_trajectories.py --config configs/qwen25_1_5b_mvp.json
-```
-
-Outputs will be written to:
-
-```text
-outputs/qwen25_1_5b_mvp/
-  data/
-  hidden/
-  metrics/
-  figures/
-  validation/
-```
-
-The extraction step saves five representations in one model pass:
-
-- `last_token`: the original final non-padding token; this often is punctuation.
-- `last_content_token`: the final token containing a Unicode letter, number, or mark.
-- `shared_sentinel`: one identical EOS/sentinel token appended to every language after the sentence.
-- `mean_pool`: the original all-token mean, excluding the appended sentinel.
-- `content_mean_pool`: a mean over content-bearing tokens only.
-
-`hidden/metadata.csv` and `hidden/hidden_state_sentence_index.jsonl` map every vector row back to
-its source sentence, complete token sequence, original last token, last content token, and sentinel.
-Use the inspector without loading the model again:
+检查向量对应的原句、token 和 EOS：
 
 ```bash
 python src/inspect_hidden_states.py \
   --config configs/qwen25_1_5b_mvp.json \
-  --rows 0,200,400,600 --layers 0,16,28 --show-token-sequence
+  --rows 0,100,200 --layers 0,14,28 --show-token-sequence
 ```
 
-After the unified run, begin with:
-
-```text
-outputs/qwen25_1_5b_mvp/validation/validation_summary.md
-```
-
-The numbered files in `validation/` preserve each validation question separately: dataset,
-sentence/token audit, hidden integrity, semantics, English specificity, attraction/hubness,
-re-separation, representation robustness, and k robustness. Each report records the method,
-evidence, interpretation, and any required action.
-
-Bootstrap confidence intervals, automatic claim verdicts, and pooling summaries
-are written to:
-
-```text
-metrics/research_summary.txt
-metrics/re_separation_summary.csv
-metrics/pooling_robustness_summary.csv
-figures/re_separation_strength.png
-figures/pooling_robustness_summary.png
-```
-
-Run the optional kNN robustness sweep without reloading the model:
+## 多模型一键运行
 
 ```bash
-python src/sweep_k.py --config configs/qwen25_1_5b_mvp.json --k-values 5 10 20
+python src/run_model_suite.py --suite configs/model_suite_24lang.json
 ```
 
-This writes isolated `metrics/k5`, `metrics/k10`, and `metrics/k20`
-directories plus `figures/k_robustness_summary.png`.
+首个模型准备一次 FLORES 数据；后续模型复用经过哈希核对的完全相同数据。最后自动生成归一化层深的跨模型比较。
 
-The main figures are:
+若已经完成了 Qwen 单模型试跑，可安全续跑；只有配置快照完全一致且必需输出齐全的模型才会被跳过：
+
+```bash
+python src/run_model_suite.py --suite configs/model_suite_24lang.json --resume
+```
+
+若先做快速 smoke test，可暂时跳过 k sweep：
+
+```bash
+python src/run_model_suite.py \
+  --suite configs/model_suite_24lang.json \
+  --skip-k-sweep
+```
+
+## 主要输出
 
 ```text
-alignment_gain_by_layer.png
-similarity_sanity_check.png
-semantic_retrieval_recall1.png
-anchor_specificity_by_layer.png
-english_specificity_contrasts.png
-english_hub_attraction_by_layer.png
-hubness_occurrence_by_layer.png
-language_neighborhood_purity.png
-centroid_separation_by_layer.png
-re_separation_strength.png
-pooling_robustness_summary.png
+outputs/<experiment>/
+  data/dataset_manifest.json
+  hidden/sentence_layer_mean_pool.npy
+  hidden/sentence_layer_sentinel_eos.npy
+  metrics/metrics_manifest.json
+  metrics/within_semantic_pair_similarity.csv
+  metrics/within_semantic_knn.csv
+  metrics/hubness_by_language.csv
+  metrics/hubness_global.csv
+  metrics/english_hubness_evidence.csv
+  metrics/english_source_group_attraction.csv
+  metrics/english_hubness_breadth.csv
+  metrics/representation_agreement.csv
+  validation/validation_summary.md
 ```
 
-## First Discovery Questions
+跨模型输出位于 `outputs/model_comparison_24lang/`。
 
-Use the first plots to answer:
+## 解释边界
 
-1. Is parallel-sentence similarity reliably above the shuffled baseline?
-2. Is English specificity higher than all pseudo-anchor languages?
-3. Does English occupy more cross-language kNN slots than the uniform baseline?
-4. Does language neighborhood purity fall in middle layers and recover late?
-5. Do last-token and mean-pool representations support the same broad pattern?
-
-## Important Notes
-
-- The raw final token remains the historical baseline because a causal decoder's final position has seen
-  the full left context. The updated Qwen pilot uses `shared_sentinel` as its configured primary
-  representation and treats raw final-token results as a control. Final-content-token and shared-sentinel
-  results must agree before a terminal-token-sensitive claim is treated as robust.
-- Hidden states are contextual representations, not pure semantic outputs. Parallel retrieval and shuffled baselines test whether they carry usable sentence semantics.
-- Keep the first run small: 100-300 sentences per language.
-- Do not save every token from every sentence at first; hidden state files grow quickly.
-
-## Interpretation Guardrails
-
-- High raw cosine alone is not semantic alignment; require positive `AlignmentGain` and above-chance parallel retrieval.
-- Positive English specificity is proximity evidence, not hubness; require English kNN attraction above the balanced baseline.
-- Falling English attraction alone is not re-separation; require late recovery of language neighborhood purity, preferably with centroid separation.
-- Do not call a late change a correction mechanism without a later intervention experiment.
-
-## Suggested Paper Angle
-
-Working title:
-
-> Hook-Based Layer Trajectory Analysis for Detecting Language Centralization in Multilingual LLMs
-
-Contribution:
-
-1. A hook-style framework for extracting layer-wise multilingual representations.
-2. Controlled sentence-level measures separating semantic alignment, English specificity, and hubness.
-3. Evidence for or against late language re-separation.
-4. Pooling and random-baseline validation of the observed trajectories.
+- 同语义设计控制了内容差异，但无法自动控制翻译质量、句长、token 数、训练语料比例和文字系统效应。
+- 英语的平均 cosine 更高只能算中心接近证据；只有 reverse-kNN/中心性排名/medoid 等反复被选中证据才属于 hubness。
+- 局部密度校正后消失的英语优势，更可能来自各向异性或密度差异。
+- 只在 Qwen 上成立的轨迹不得写成通用多语言模型规律。
+- 新协议不再运行旧版跨语义检索、语言 neighborhood purity 和 re-separation 指标；历史输出仅供追溯。

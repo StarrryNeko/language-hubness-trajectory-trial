@@ -8,6 +8,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from common import load_config
+
 
 def run_step(label, script, config, extra_args=None):
     command = [sys.executable, str(script), "--config", config]
@@ -55,8 +57,8 @@ def main():
     )
     args = parser.parse_args()
 
-    config_text = Path(args.config).read_text(encoding="utf-8")
-    cfg = json.loads(config_text)
+    cfg = load_config(args.config)
+    config_text = json.dumps(cfg, indent=2, ensure_ascii=False)
 
     started_at = time.perf_counter()
     started_iso = datetime.now(timezone.utc).isoformat()
@@ -67,12 +69,12 @@ def main():
     if not args.skip_extract:
         extract_args = ["--show-sentences", args.show_sentences] if args.show_sentences else []
         steps.append((
-            "Extract auditable sentence representations and token controls",
+            "Extract mean-pool vectors and sentinel-EOS validation vectors",
             src_dir / "extract_hidden.py",
             extract_args,
         ))
     steps.append((
-        "Compute semantic, specificity, attraction, hubness, and re-separation metrics",
+        "Compute strictly same-semantics multilingual hubness metrics",
         src_dir / "compute_metrics.py",
         [],
     ))
@@ -104,7 +106,7 @@ def main():
         "config_path": str(Path(args.config).resolve()),
         "config_sha256": hashlib.sha256(config_text.encode("utf-8")).hexdigest(),
         "experiment_name": cfg.get("experiment_name"),
-        "model": cfg.get("model_name_or_path"),
+        "model": cfg.get("model", {}).get("name_or_path", cfg.get("model_name_or_path")),
         "dataset": cfg.get("dataset"),
         "metrics": cfg.get("metrics"),
         "representation_controls": cfg.get("representation_controls"),

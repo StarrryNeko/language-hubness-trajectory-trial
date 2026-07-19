@@ -1,64 +1,9 @@
 {
-  "experiment_name": "qwen25_1_5b_mvp",
-  "model_name_or_path": "Qwen/Qwen2.5-1.5B",
-  "output_dir": "outputs/qwen25_1_5b_mvp",
-  "seed": 42,
-  "device": "cuda",
-  "dtype": "float16",
-  "max_length": 128,
-  "batch_size": 1,
-  "dataset": {
-    "source": "flores",
-    "split": "dev",
-    "sample_size_per_language": 200,
-    "languages": {
-      "en": "eng_Latn",
-      "zh": "zho_Hans",
-      "de": "deu_Latn",
-      "ha": "hau_Latn"
-    }
+  "extends": "base_24lang_same_semantics.json",
+  "experiment_name": "qwen25_1_5b_24lang",
+  "model": {
+    "name_or_path": "Qwen/Qwen2.5-1.5B",
+    "trust_remote_code": false
   },
-  "data_validation": {
-    "known_suffix_policy": "replace",
-    "known_suffix_replacements": {
-      ".x": "."
-    }
-  },
-  "metrics": {
-    "english_language": "en",
-    "nearest_neighbors_k": 10,
-    "representations": [
-      "last_token",
-      "last_content_token",
-      "shared_sentinel",
-      "mean_pool",
-      "content_mean_pool"
-    ],
-    "primary_representation": "shared_sentinel",
-    "bootstrap_samples": 500,
-    "confidence_level": 0.95,
-    "shuffled_permutations": 20,
-    "min_consecutive_layers": 3,
-    "reseparation_windows": {
-      "exclude_layers": [0],
-      "early": [1, 8],
-      "mid": [9, 17],
-      "late": [22, 28]
-    }
-  },
-  "representation_controls": {
-    "append_shared_sentinel": true
-  },
-  "hidden_state_audit": {
-    "display_sentences": "preview",
-    "preview_per_language": 3
-  },
-  "robustness": {
-    "run_k_sweep_in_full_pipeline": true,
-    "k_values": [5, 10, 20]
-  },
-  "token_export": {
-    "enabled": false,
-    "max_samples_per_language": 5
-  }
+  "output_dir": "outputs/qwen25_1_5b_24lang"
 }

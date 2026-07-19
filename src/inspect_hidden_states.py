@@ -56,7 +56,7 @@ def main():
     requested_representations = (
         [item.strip() for item in args.representations.split(",") if item.strip()]
         if args.representations
-        else cfg.get("metrics", {}).get("representations", ["last_token"])
+        else cfg.get("metrics", {}).get("representations", ["mean_pool", "sentinel_eos"])
     )
     arrays = {}
     for name in requested_representations:
@@ -84,10 +84,8 @@ def main():
         print(f"row={row_idx} id={row.id} lang={row.lang}")
         print(f"sentence: {row.text}")
         print(
-            f"terminal={getattr(row, 'terminal_char', '')!r} "
-            f"original_last={getattr(row, 'last_token_decoded', row.last_token)!r} "
-            f"last_content={getattr(row, 'last_content_token_decoded', '')!r} "
-            f"sentinel={getattr(row, 'shared_sentinel_decoded', '')!r}"
+            f"sentence_tokens={getattr(row, 'sentence_num_tokens', '')} "
+            f"sentinel_eos={getattr(row, 'sentinel_eos_decoded', '')!r}"
         )
         record = sentence_index.get(row_idx)
         if args.show_token_sequence and record:
@@ -95,13 +93,9 @@ def main():
                 zip(record["token_ids"], record["tokens"], record["decoded_tokens"])
             ):
                 markers = []
-                if position == int(record["last_token_position"]):
-                    markers.append("ORIGINAL_LAST")
-                if position == int(record["last_content_position"]):
-                    markers.append("LAST_CONTENT")
-                sentinel_position = record.get("shared_sentinel_position")
+                sentinel_position = record.get("sentinel_eos_position")
                 if sentinel_position != "" and position == int(sentinel_position):
-                    markers.append("SHARED_SENTINEL")
+                    markers.append("SENTINEL_EOS")
                 print(
                     f"  token[{position:03d}] id={token_id:<8} raw={token!r:<22} "
                     f"decoded={decoded!r} {' '.join(markers)}"

@@ -7,9 +7,25 @@ import numpy as np
 
 
 def load_config(path):
-    with open(path, "r", encoding="utf-8") as f:
+    path = Path(path)
+    with path.open("r", encoding="utf-8") as f:
         cfg = json.load(f)
-    return cfg
+    parent = cfg.pop("extends", None)
+    if not parent:
+        return cfg
+
+    base = load_config(path.parent / parent)
+
+    def merge(left, right):
+        result = dict(left)
+        for key, value in right.items():
+            if isinstance(value, dict) and isinstance(result.get(key), dict):
+                result[key] = merge(result[key], value)
+            else:
+                result[key] = value
+        return result
+
+    return merge(base, cfg)
 
 
 def ensure_dirs(cfg):
@@ -28,14 +44,54 @@ def ensure_dirs(cfg):
 
 
 def representation_file_map():
-    """Canonical filenames for every sentence representation produced by extraction."""
+    """Canonical filenames for supported sentence representations.
+
+    ``shared_sentinel`` is retained as a read-only compatibility alias for old
+    experiments. New experiments use the clearer ``sentinel_eos`` name.
+    """
     return {
-        "last_token": "sentence_layer_last_token.npy",
-        "last_content_token": "sentence_layer_last_content_token.npy",
-        "shared_sentinel": "sentence_layer_shared_sentinel.npy",
         "mean_pool": "sentence_layer_mean_pool.npy",
-        "content_mean_pool": "sentence_layer_content_mean_pool.npy",
+        "sentinel_eos": "sentence_layer_sentinel_eos.npy",
+        "shared_sentinel": "sentence_layer_shared_sentinel.npy",
     }
+
+
+def configured_representations(cfg):
+    """Return and validate the two representations in the revised protocol."""
+    metrics = cfg.get("metrics", {})
+    names = list(metrics.get("representations", ["mean_pool", "sentinel_eos"]))
+    allowed = {"mean_pool", "sentinel_eos"}
+    unknown = sorted(set(names) - allowed)
+    if unknown:
+        raise ValueError(
+            "The revised protocol only supports mean_pool and sentinel_eos; "
+            f"remove: {unknown}"
+        )
+    if len(names) != len(set(names)):
+        raise ValueError("metrics.representations contains duplicates")
+    if "mean_pool" not in names:
+        raise ValueError("mean_pool must be included as the primary sentence representation")
+    primary = metrics.get("primary_representation", "mean_pool")
+    if primary != "mean_pool":
+        raise ValueError("metrics.primary_representation must be mean_pool in the revised protocol")
+    validation = metrics.get("validation_representation", "sentinel_eos")
+    if validation not in names:
+        raise ValueError("metrics.validation_representation must be present in metrics.representations")
+    return names
+
+
+def validate_language_inventory(cfg):
+    """Require a balanced, genuinely multilingual same-semantics candidate set."""
+    dataset = cfg.get("dataset", {})
+    languages = dataset.get("languages", {})
+    minimum = int(dataset.get("minimum_languages_per_semantic_group", 20))
+    if minimum < 20:
+        raise ValueError("minimum_languages_per_semantic_group must be at least 20")
+    if len(languages) < minimum:
+        raise ValueError(
+            f"Configured language count is {len(languages)}; at least {minimum} are required"
+        )
+    return list(languages)
 
 
 def set_seed(seed):
