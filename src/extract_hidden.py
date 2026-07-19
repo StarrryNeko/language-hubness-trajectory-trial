@@ -1,7 +1,12 @@
 import argparse
 import json
+import os
 import time
 from pathlib import Path
+
+# AutoDL containers can receive transient CAS 401/OOM failures from hf-xet.
+# This must be set before importing transformers/huggingface_hub.
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 import numpy as np
 import pandas as pd
@@ -118,7 +123,7 @@ def main():
         raise ValueError("max_length must leave space for text plus BOS/EOS controls")
 
     load_kwargs = {
-        "torch_dtype": dtype,
+        "dtype": dtype,
         "trust_remote_code": settings["trust_remote_code"],
     }
     if settings["cache_dir"]:

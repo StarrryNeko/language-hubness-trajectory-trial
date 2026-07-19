@@ -1,8 +1,13 @@
 import argparse
 import json
+import os
 import shutil
 import unicodedata
 from pathlib import Path
+
+# Keep dataset downloads on the lower-memory HTTP path in AutoDL containers.
+# huggingface_hub reads this variable when it is imported by datasets below.
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 from datasets import load_dataset
 from tqdm import tqdm
@@ -15,6 +20,12 @@ from common import (
     validate_language_inventory,
     write_jsonl,
 )
+
+
+FLORES_PLUS_CONFIG_ALIASES = {
+    # FLORES-200 used zho_Hans; FLORES+ identifies Mandarin as cmn_Hans.
+    "zho_Hans": "cmn_Hans",
+}
 
 
 def pick_sentence(row):
@@ -130,10 +141,16 @@ def main():
             "openlanguagedata/flores_plus" if source == "flores_plus" else "facebook/flores",
         )
         cache_dir = dataset_cfg.get("cache_dir", cfg.get("huggingface_cache_dir"))
-        for short_lang, flores_lang in tqdm(languages.items(), desc="Loading FLORES languages"):
+        for short_lang, configured_flores_lang in tqdm(languages.items(), desc="Loading FLORES languages"):
+            flores_lang = (
+                FLORES_PLUS_CONFIG_ALIASES.get(configured_flores_lang, configured_flores_lang)
+                if source == "flores_plus" else configured_flores_lang
+            )
             load_kwargs = {"split": split}
             if cache_dir:
                 load_kwargs["cache_dir"] = cache_dir
+            if bool(dataset_cfg.get("use_auth_token", source == "flores_plus")):
+                load_kwargs["token"] = True
             ds = load_dataset(dataset_name, flores_lang, **load_kwargs)
             limit = min(sample_size, len(ds))
             for idx in range(limit):
@@ -143,6 +160,7 @@ def main():
                         "id": f"{idx:05d}",
                         "lang": short_lang,
                         "flores_lang": flores_lang,
+                        "configured_flores_lang": configured_flores_lang,
                         "text": pick_sentence(row),
                     }
                 )
