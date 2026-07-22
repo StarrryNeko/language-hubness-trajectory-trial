@@ -8,14 +8,7 @@ import pandas as pd
 import seaborn as sns
 
 from common import ensure_dirs, load_config
-
-
-def max_consecutive(values):
-    best = current = 0
-    for value in values:
-        current = current + 1 if bool(value) else 0
-        best = max(best, current)
-    return best
+from evidence_rules import joint_positive_layers, max_consecutive_layers
 
 
 def main():
@@ -36,29 +29,31 @@ def main():
         ], check=True)
         frame = pd.read_csv(Path(paths["metrics"]) / tag / "english_hubness_evidence.csv")
         frame = frame[(frame.representation == primary) & (frame.similarity_method == "cosine")]
+        joint_layers = joint_positive_layers(frame)
+        joint_run = max_consecutive_layers(joint_layers)
         for metric, group in frame.groupby("metric"):
             peak = group.loc[group["mean"].idxmax()]
             rows.append({
                 "k": k,
                 "metric": metric,
                 "positive_ci_layers": int((group.ci_lower > 0).sum()),
-                "positive_ci_longest_run": max_consecutive(
-                    (group.sort_values("layer").ci_lower > 0).tolist()
+                "positive_ci_longest_run": max_consecutive_layers(
+                    group.loc[group.ci_lower > 0, "layer"].astype(int).tolist()
                 ),
+                "joint_positive_ci_layers": len(joint_layers),
+                "joint_positive_ci_longest_run": joint_run,
                 "peak_value": float(peak["mean"]),
                 "peak_layer": int(peak.layer),
             })
     summary = pd.DataFrame(rows)
     summary.to_csv(Path(paths["metrics"]) / "k_robustness_summary.csv", index=False)
-    sign_support = summary.pivot(index="metric", columns="k", values="positive_ci_longest_run")
     min_run = int(cfg["metrics"].get("min_consecutive_layers", 3))
-    status = "CONSISTENT" if (sign_support.max(axis=1) >= min_run).equals(
-        sign_support.min(axis=1) >= min_run
-    ) else "SENSITIVE"
+    joint_support = summary.groupby("k").joint_positive_ci_longest_run.first() >= min_run
+    status = "CONSISTENT" if joint_support.nunique() == 1 else "SENSITIVE"
     pd.DataFrame([{
         "status": status,
         "k_values": ",".join(map(str, args.k_values)),
-        "criterion": f"same presence/absence of >={min_run}-layer positive-CI runs for every evidence metric",
+        "criterion": f"same presence/absence of a >={min_run}-layer run where all four CIs are jointly positive",
     }]).to_csv(Path(paths["metrics"]) / "k_robustness_verdict.csv", index=False)
     sns.set_theme(style="whitegrid")
     plt.figure(figsize=(9, 5))

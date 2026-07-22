@@ -19,13 +19,20 @@ from common import (
     representation_file_map,
     validate_language_inventory,
 )
+from numerical_validation import (
+    require_finite,
+    require_nonzero_row_norms,
+    validate_representation_array,
+    validate_similarity_matrix,
+)
+from evidence_rules import joint_positive_layers, max_consecutive_layers
 
 
 def bootstrap_mean_ci(values, rng, n_boot=500, confidence=0.95):
     values = np.asarray(values, dtype=np.float64)
-    values = values[np.isfinite(values)]
     if not len(values):
-        return np.nan, np.nan, np.nan
+        raise ValueError("bootstrap_mean_ci: values must not be empty")
+    require_finite(values, "bootstrap_mean_ci input")
     mean = float(values.mean())
     if len(values) == 1 or n_boot <= 0:
         return mean, mean, mean
@@ -59,22 +66,28 @@ def skewness(values):
 
 def locally_scaled_similarity(cosine, density_k):
     """Multiway CSLS-style control computed only inside one semantic group."""
+    cosine = validate_similarity_matrix(cosine, "local-scaled cosine input")
     n = cosine.shape[0]
+    if not 1 <= int(density_k) < n:
+        raise ValueError(f"density_k must be in 1..{n - 1}, got {density_k}")
     masked = cosine.copy()
     np.fill_diagonal(masked, -np.inf)
     take = min(max(1, density_k), n - 1)
     local_density = np.partition(masked, n - take, axis=1)[:, -take:].mean(axis=1)
     adjusted = 2 * cosine - local_density[:, None] - local_density[None, :]
     np.fill_diagonal(adjusted, 1.0)
-    return adjusted
+    return validate_similarity_matrix(adjusted, "local-scaled cosine output")
 
 
 def group_statistics(similarity, k):
     """Compute graph statistics for one parallel semantic group (languages x languages)."""
+    similarity = validate_similarity_matrix(similarity, "group_statistics similarity")
     n = similarity.shape[0]
+    if not 1 <= int(k) < n:
+        raise ValueError(f"k must be in 1..{n - 1}, got {k}")
     masked = similarity.copy()
     np.fill_diagonal(masked, -np.inf)
-    take = min(k, n - 1)
+    take = int(k)
     selected = np.zeros((n, n), dtype=np.float64)
     # Fractionally split the final slots across boundary ties. This preserves
     # exactly k mass per query and prevents array/language order from creating
@@ -95,6 +108,28 @@ def group_statistics(similarity, k):
     max_centrality = centrality.max()
     medoid = np.isclose(centrality, max_centrality).astype(np.float64)
     medoid /= medoid.sum()
+    row_mass = selected.sum(axis=1)
+    if not np.allclose(row_mass, take, rtol=0.0, atol=1e-8):
+        raise ValueError(
+            f"kNN mass conservation failed per query: expected={take}, "
+            f"range={row_mass.min()}..{row_mass.max()}"
+        )
+    total_mass = float(occurrence.sum())
+    expected_mass = float(n * take)
+    if not np.isclose(total_mass, expected_mass, rtol=0.0, atol=1e-8):
+        raise ValueError(
+            f"kNN occurrence mass conservation failed: expected={expected_mass}, got={total_mass}"
+        )
+    for name, values in {
+        "selected": selected,
+        "occurrence": occurrence,
+        "centrality": centrality,
+        "percentile": percentile,
+        "medoid": medoid,
+    }.items():
+        require_finite(values, f"group_statistics {name}")
+    if not np.isclose(medoid.sum(), 1.0, rtol=0.0, atol=1e-8):
+        raise ValueError(f"medoid mass conservation failed: expected=1, got={medoid.sum()}")
     return selected, occurrence, centrality, percentile, medoid
 
 
@@ -183,16 +218,18 @@ def main():
     for representation in representations:
         vector_path = Path(paths["hidden"]) / representation_file_map()[representation]
         vectors = np.load(vector_path, mmap_mode="r")
-        if vectors.shape[0] != len(meta):
-            raise ValueError(f"{representation} row count does not match metadata")
+        validate_representation_array(vectors, len(meta), f"representation={representation}")
         n_layers = vectors.shape[1]
 
         for layer in tqdm(range(n_layers), desc=f"Same-semantics metrics ({representation}, k={k})"):
             raw_by_id = {}
             for semantic_id in semantic_ids:
                 group = np.asarray(vectors[id_indices[semantic_id], layer, :], dtype=np.float32)
+                context = f"representation={representation} semantic_id={semantic_id} layer={layer}"
+                require_nonzero_row_norms(group, context)
                 normalized = l2_normalize(group, axis=1)
-                raw_by_id[semantic_id] = normalized @ normalized.T
+                cosine = normalized @ normalized.T
+                raw_by_id[semantic_id] = validate_similarity_matrix(cosine, f"{context} cosine")
 
             upper = np.triu_indices(len(languages), 1)
             pair_samples[(representation, layer)] = np.concatenate([
@@ -393,6 +430,8 @@ def main():
     main_evidence = evidence[
         (evidence.representation == primary) & (evidence.similarity_method == "cosine")
     ]
+    joint_layers = joint_positive_layers(main_evidence)
+    joint_run = max_consecutive_layers(joint_layers)
     supported = main_evidence.assign(supported=main_evidence.ci_lower > 0).groupby("metric").supported.sum()
     max_layers = main_evidence.groupby("metric").apply(
         lambda group: int(group.loc[group["mean"].idxmax(), "layer"]), include_groups=False
@@ -405,6 +444,7 @@ def main():
         "English positive-CI layer counts: " + ", ".join(
             f"{name}={int(count)}" for name, count in supported.items()
         ),
+        f"English four-metric joint-positive layers: {joint_layers}; longest run={joint_run}",
         "English evidence peak layers: " + ", ".join(
             f"{name}={int(layer)}" for name, layer in max_layers.items()
         ),
@@ -421,6 +461,7 @@ def main():
         "representations": representations,
         "similarity_methods": methods,
         "bootstrap_unit": "semantic_id",
+        "joint_evidence_rule": "all_four_ci_lower_gt_zero_on_same_layer",
         "output_files": list(outputs),
     }
     (metrics_dir / "metrics_manifest.json").write_text(

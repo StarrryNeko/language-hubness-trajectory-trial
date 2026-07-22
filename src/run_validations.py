@@ -6,17 +6,11 @@ import numpy as np
 import pandas as pd
 
 from common import configured_representations, ensure_dirs, load_config, representation_file_map
+from evidence_rules import classify_model_status, joint_positive_layers, max_consecutive_layers
+from numerical_validation import validate_representation_array
 
 
 ORDER = {"PASS": 0, "WARN": 1, "FAIL": 2}
-
-
-def max_consecutive(values):
-    best = current = 0
-    for value in values:
-        current = current + 1 if bool(value) else 0
-        best = max(best, current)
-    return best
 
 
 def report(name, status, method, evidence, interpretation, actions=None):
@@ -88,6 +82,7 @@ def main():
     metadata_path = hidden / "metadata.csv"
     extraction_ok = metadata_path.exists()
     extraction_evidence = []
+    extraction_layer_counts = set()
     if extraction_ok:
         meta = pd.read_csv(metadata_path)
         extraction_evidence.append(f"Metadata rows={len(meta)}")
@@ -102,11 +97,26 @@ def main():
                 extraction_evidence.append(f"Missing {path.name}")
                 continue
             values = np.load(path, mmap_mode="r")
-            finite = bool(np.isfinite(np.asarray(values[: min(len(values), 16)], dtype=np.float32)).all())
-            extraction_ok &= values.shape[0] == len(meta) and finite
-            extraction_evidence.append(f"{name}: shape={tuple(values.shape)}, finite_sample={finite}")
+            try:
+                validate_representation_array(values, len(meta), f"validation representation={name}")
+                finite = True
+            except ValueError as error:
+                finite = False
+                extraction_evidence.append(str(error))
+            extraction_ok &= finite
+            if values.ndim == 3:
+                extraction_layer_counts.add(int(values.shape[1]))
+            extraction_evidence.append(f"{name}: shape={tuple(values.shape)}, all_finite={finite}")
     else:
         extraction_evidence.append("metadata.csv is missing")
+    if len(extraction_layer_counts) != 1:
+        extraction_ok = False
+        expected_metric_layers = None
+        extraction_evidence.append(
+            f"Representations must share exactly one layer count; found={sorted(extraction_layer_counts)}"
+        )
+    else:
+        expected_metric_layers = list(range(next(iter(extraction_layer_counts))))
     reports.append(report(
         "Mean-pool and sentinel-EOS extraction", "PASS" if extraction_ok else "FAIL",
         "Verify that only the two approved representations exist in the active config, EOS is identical within a model, and arrays are finite/aligned.",
@@ -114,7 +124,6 @@ def main():
         "Sentence representations follow the revised protocol." if extraction_ok else "Extraction is unsafe.",
         [] if extraction_ok else ["Rerun extract_hidden.py before computing metrics."],
     ))
-
     metric_manifest_path = metrics / "metrics_manifest.json"
     if metric_manifest_path.exists():
         metric_manifest = json.loads(metric_manifest_path.read_text(encoding="utf-8"))
@@ -140,46 +149,54 @@ def main():
     evidence_path = metrics / "english_hubness_evidence.csv"
     hub_status = "FAIL"
     hub_evidence = ["english_hubness_evidence.csv is missing"]
+    min_run = int(cfg["metrics"].get("min_consecutive_layers", 3))
+    primary = cfg["metrics"].get("primary_representation", "mean_pool")
+    validation_representation = cfg["metrics"].get("validation_representation", "sentinel_eos")
+    primary_joint_layers = []
+    broad_layer_numbers = []
+    eos_joint_layers = []
+    density_joint_layers = []
+    evidence_error = None
+    frame = None
     if evidence_path.exists():
-        frame = pd.read_csv(evidence_path)
-        primary = cfg["metrics"].get("primary_representation", "mean_pool")
-        min_run = int(cfg["metrics"].get("min_consecutive_layers", 3))
-        main = frame[(frame.representation == primary) & (frame.similarity_method == "cosine")]
-        positive = main.groupby("metric").apply(lambda g: int((g.ci_lower > 0).sum()), include_groups=False)
-        longest = main.groupby("metric").apply(
-            lambda g: max_consecutive((g.sort_values("layer").ci_lower > 0).tolist()),
-            include_groups=False,
-        )
-        required = {"k_occurrence_excess", "centrality_advantage", "rank_percentile_advantage", "medoid_rate_excess"}
-        breadth_path = metrics / "english_hubness_breadth.csv"
-        broad_layers = broad_longest = 0
-        breadth_note = "breadth summary missing"
-        if breadth_path.exists():
+        try:
+            frame = pd.read_csv(evidence_path)
+            main = frame[(frame.representation == primary) & (frame.similarity_method == "cosine")]
+            primary_joint_layers = joint_positive_layers(main, expected_layers=expected_metric_layers)
+            breadth_path = metrics / "english_hubness_breadth.csv"
+            if not breadth_path.exists():
+                raise ValueError("english_hubness_breadth.csv is missing")
             breadth = pd.read_csv(breadth_path)
             breadth = breadth[
                 (breadth.representation == primary) & (breadth.similarity_method == "cosine")
-            ]
+            ].copy()
+            if breadth.empty or breadth.duplicated("layer").any():
+                raise ValueError("primary breadth grid is empty or contains duplicate layers")
+            if expected_metric_layers is not None and set(breadth.layer.astype(int)) != set(expected_metric_layers):
+                raise ValueError("primary breadth grid does not cover every expected layer")
+            numeric = breadth[[
+                "supported_source_languages", "total_source_languages",
+                "supported_source_scripts", "supported_non_latin_languages",
+            ]].to_numpy(dtype=np.float64)
+            if not np.isfinite(numeric).all():
+                raise ValueError("primary breadth grid contains non-finite values")
             broad = (
                 (breadth.supported_source_languages >= np.ceil(breadth.total_source_languages / 2))
                 & (breadth.supported_source_scripts >= 4)
                 & (breadth.supported_non_latin_languages >= 3)
             )
-            broad_layers = int(broad.sum())
-            broad_longest = max_consecutive(broad.tolist())
-            breadth_note = (
-                f"Broad source coverage layers={broad_layers}/{len(breadth)}; "
-                f"longest run={broad_longest}"
-            )
-        hub_status = "PASS" if (
-            required.issubset(longest.index)
-            and (longest[list(required)] >= min_run).all()
-            and broad_longest >= min_run
-        ) else "WARN"
-        hub_evidence = [
-            f"Positive-CI layers by evidence: {positive.to_dict()}",
-            f"Longest positive-CI runs: {longest.to_dict()} (required={min_run})",
-            breadth_note,
-        ]
+            broad_layer_numbers = breadth.loc[broad, "layer"].astype(int).tolist()
+            primary_with_breadth = sorted(set(primary_joint_layers) & set(broad_layer_numbers))
+            primary_run = max_consecutive_layers(primary_with_breadth)
+            hub_status = "PASS" if primary_run >= min_run else "WARN"
+            hub_evidence = [
+                f"Four-metric joint-positive layers={primary_joint_layers}",
+                f"Broad-source layers={broad_layer_numbers}",
+                f"Joint evidence + breadth layers={primary_with_breadth}; longest run={primary_run}; required={min_run}",
+            ]
+        except (KeyError, TypeError, ValueError) as error:
+            evidence_error = str(error)
+            hub_evidence = [f"Invalid primary evidence: {error}"]
     reports.append(report(
         "Multi-dimensional English hubness evidence", hub_status,
         "Require English to exceed the balanced null in reverse-kNN occurrence, centrality, rank, and medoid rate, with support from at least half of source languages and multiple scripts; proximity alone is insufficient.",
@@ -189,13 +206,27 @@ def main():
 
     agreement_path = metrics / "representation_agreement.csv"
     agreement_status = "FAIL"
-    agreement_evidence = ["representation_agreement.csv is missing"]
-    if agreement_path.exists():
-        agree = pd.read_csv(agreement_path)
-        sign_rate = float(agree.english_evidence_sign_agreement.astype(str).str.lower().eq("true").mean())
-        median_r = float(agree.pairwise_similarity_pearson.median())
-        agreement_status = "PASS" if sign_rate >= 0.8 and median_r >= 0.5 else "WARN"
-        agreement_evidence = [f"English evidence sign agreement={sign_rate:.1%}", f"Median pair-geometry Pearson r={median_r:.3f}"]
+    agreement_evidence = ["English evidence is missing"]
+    if frame is not None:
+        try:
+            eos = frame[
+                (frame.representation == validation_representation)
+                & (frame.similarity_method == "cosine")
+            ]
+            eos_joint_layers = joint_positive_layers(eos, expected_layers=expected_metric_layers)
+            eos_run = max_consecutive_layers(eos_joint_layers)
+            agreement_status = "PASS" if eos_run >= min_run else "WARN"
+            agreement_evidence = [
+                f"Four-metric joint-positive EOS layers={eos_joint_layers}",
+                f"Longest run={eos_run}; required={min_run}",
+            ]
+            if agreement_path.exists():
+                agree = pd.read_csv(agreement_path)
+                median_r = float(agree.pairwise_similarity_pearson.median())
+                agreement_evidence.append(f"Secondary pair-geometry median Pearson r={median_r:.3f}")
+        except (KeyError, TypeError, ValueError) as error:
+            evidence_error = evidence_error or str(error)
+            agreement_evidence = [f"Invalid EOS evidence: {error}"]
     reports.append(report(
         "Sentinel-EOS validation", agreement_status,
         "Compare layer-wise English evidence signs and all within-semantics language-pair similarities between mean pooling and sentinel EOS.",
@@ -228,15 +259,23 @@ def main():
         "Exclude high-tie layers from substantive hubness claims even though fractional ranking prevents order bias.",
     ))
 
-    if evidence_path.exists():
-        frame = pd.read_csv(evidence_path)
-        primary = cfg["metrics"].get("primary_representation", "mean_pool")
-        cosine = frame[(frame.representation == primary) & (frame.similarity_method == "cosine")]
-        scaled = frame[(frame.representation == primary) & (frame.similarity_method == "local_scaled_cosine")]
-        merged = cosine.merge(scaled, on=["layer", "metric"], suffixes=("_cos", "_scaled"))
-        density_sign = float((np.sign(merged.mean_cos) == np.sign(merged.mean_scaled)).mean()) if len(merged) else 0.0
-        density_status = "PASS" if density_sign >= 0.8 else "WARN"
-        density_evidence = [f"Cosine/local-scaled sign agreement={density_sign:.1%}"]
+    if frame is not None:
+        try:
+            scaled = frame[
+                (frame.representation == primary)
+                & (frame.similarity_method == "local_scaled_cosine")
+            ]
+            density_joint_layers = joint_positive_layers(scaled, expected_layers=expected_metric_layers)
+            density_run = max_consecutive_layers(density_joint_layers)
+            density_status = "PASS" if density_run >= min_run else "WARN"
+            density_evidence = [
+                f"Four-metric joint-positive local-scaled layers={density_joint_layers}",
+                f"Longest run={density_run}; required={min_run}",
+            ]
+        except (KeyError, TypeError, ValueError) as error:
+            evidence_error = evidence_error or str(error)
+            density_status = "FAIL"
+            density_evidence = [f"Invalid density-control evidence: {error}"]
     else:
         density_status, density_evidence = "FAIL", ["English evidence is missing"]
     reports.append(report(
@@ -265,13 +304,38 @@ def main():
     ]
     stems = [write_report(validation, i, slug, payload) for i, (slug, payload) in enumerate(zip(slugs, reports), 1)]
     overall = max(reports, key=lambda item: ORDER[item["status"]])["status"]
+    critical_invalid = evidence_error or any(
+        item["status"] == "FAIL" for item in reports[:7]
+    )
+    if critical_invalid:
+        model_rule = {
+            "status": "INVALID",
+            "reason": evidence_error or "required dataset/extraction/metric validation failed",
+            "primary_joint_layers": primary_joint_layers,
+            "eos_joint_layers": eos_joint_layers,
+            "density_joint_layers": density_joint_layers,
+            "min_consecutive_layers": min_run,
+        }
+    else:
+        model_rule = classify_model_status(
+            primary_joint_layers,
+            broad_layer_numbers,
+            eos_joint_layers,
+            density_joint_layers,
+            min_run,
+        )
     summary = {
         "overall_status": overall,
+        "model_status": model_rule["status"],
+        "joint_evidence": model_rule,
         "reports": [{"file_stem": stem, "name": item["name"], "status": item["status"]} for stem, item in zip(stems, reports)],
         "claim_rule": "English hubness requires convergent reverse-kNN, centrality/rank, medoid, source-breadth, EOS, density, k, and multi-model evidence.",
     }
     (validation / "validation_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-    lines = ["# Validation summary", "", f"**Overall status:** {overall}", ""]
+    lines = [
+        "# Validation summary", "", f"**Overall status:** {overall}",
+        f"**Model status:** {model_rule['status']}", "",
+    ]
     lines += [f"- {item['status']}: {item['name']} (`{item['file_stem']}.md`)" for item in summary["reports"]]
     lines += ["", "## Claim rule", "", summary["claim_rule"], ""]
     (validation / "validation_summary.md").write_text("\n".join(lines), encoding="utf-8")

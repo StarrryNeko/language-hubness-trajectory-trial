@@ -5,5 +5,7 @@
     "name_or_path": "facebook/xglm-1.7B",
     "trust_remote_code": false
   },
+  "dtype": "float32",
+  "storage_dtype": "float32",
   "output_dir": "outputs/xglm_1b7_24lang"
 }

@@ -24,6 +24,7 @@ from common import (
     validate_language_inventory,
     write_jsonl,
 )
+from numerical_validation import require_finite, require_nonzero_row_norms, validate_representation_array
 
 
 def get_dtype(name):
@@ -184,20 +185,41 @@ def main():
             )
 
             per_rep = {name: [] for name in representations}
-            for layer_hidden in outputs.hidden_states:
+            for layer, layer_hidden in enumerate(outputs.hidden_states):
                 hidden = layer_hidden[0].detach()
+                context_base = (
+                    f"model={settings['name']} row={row_idx} semantic_id={row['id']} "
+                    f"lang={row['lang']} layer={layer}"
+                )
+                if not bool(torch.isfinite(hidden).all().item()):
+                    raise ValueError(f"{context_base} representation=hidden_state: found NaN/Inf")
                 if "mean_pool" in per_rep:
-                    per_rep["mean_pool"].append(
-                        masked_mean(
-                            hidden[int(prepend_bos):int(prepend_bos) + text_length], text_mask[0]
-                        ).float().cpu().numpy()
+                    mean_vector = masked_mean(
+                        hidden[int(prepend_bos):int(prepend_bos) + text_length], text_mask[0]
                     )
+                    mean_vector = mean_vector.float().cpu().numpy()
+                    require_nonzero_row_norms(
+                        mean_vector,
+                        f"{context_base} representation=mean_pool before_storage",
+                    )
+                    per_rep["mean_pool"].append(mean_vector)
                 if "sentinel_eos" in per_rep:
-                    per_rep["sentinel_eos"].append(
-                        hidden[int(prepend_bos) + text_length].float().cpu().numpy()
+                    eos_vector = hidden[int(prepend_bos) + text_length].float().cpu().numpy()
+                    require_nonzero_row_norms(
+                        eos_vector,
+                        f"{context_base} representation=sentinel_eos before_storage",
                     )
+                    per_rep["sentinel_eos"].append(eos_vector)
             for name, layer_vectors in per_rep.items():
-                vectors[name].append(np.stack(layer_vectors).astype(storage_dtype, copy=False))
+                stored = np.stack(layer_vectors).astype(storage_dtype, copy=False)
+                for layer, stored_vector in enumerate(stored):
+                    stored_context = (
+                        f"model={settings['name']} row={row_idx} semantic_id={row['id']} "
+                        f"lang={row['lang']} layer={layer} representation={name} after_storage"
+                    )
+                    require_finite(stored_vector, stored_context)
+                    require_nonzero_row_norms(stored_vector, stored_context)
+                vectors[name].append(stored)
 
             token_ids = model_inputs["input_ids"][0].detach().cpu().tolist()
             meta = {
@@ -228,6 +250,9 @@ def main():
     stacked = {}
     for name, values in vectors.items():
         stacked[name] = np.stack(values)
+        validate_representation_array(
+            stacked[name], len(meta_rows), f"model={settings['name']} representation={name}"
+        )
         np.save(Path(paths["hidden"]) / file_map[name], stacked[name])
     pd.DataFrame(meta_rows).to_csv(Path(paths["hidden"]) / "metadata.csv", index=False, encoding="utf-8")
     write_jsonl(Path(paths["hidden"]) / "hidden_state_sentence_index.jsonl", index_rows)

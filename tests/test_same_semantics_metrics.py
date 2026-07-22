@@ -8,7 +8,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from common import configured_representations, load_config, validate_language_inventory
-from compute_metrics import group_statistics, locally_scaled_similarity, rank_percentiles
+from compute_metrics import bootstrap_mean_ci, group_statistics, locally_scaled_similarity, rank_percentiles
 
 
 class SameSemanticMetricTests(unittest.TestCase):
@@ -57,6 +57,21 @@ class SameSemanticMetricTests(unittest.TestCase):
         self.assertTrue(np.allclose(selected.sum(axis=1), 5))
         self.assertTrue(np.allclose(occurrence, 5))
         self.assertTrue(np.allclose(np.diag(selected), 0))
+
+    def test_bootstrap_rejects_nonfinite_observations(self):
+        rng = np.random.default_rng(2)
+        with self.assertRaisesRegex(ValueError, "non-finite"):
+            bootstrap_mean_ci([0.1, np.nan], rng)
+        with self.assertRaisesRegex(ValueError, "must not be empty"):
+            bootstrap_mean_ci([], rng)
+
+    def test_similarity_and_k_are_validated(self):
+        with self.assertRaisesRegex(ValueError, "non-finite"):
+            locally_scaled_similarity(np.array([[1.0, np.nan], [np.nan, 1.0]]), 1)
+        with self.assertRaisesRegex(ValueError, "k must be"):
+            group_statistics(np.eye(3), k=0)
+        with self.assertRaisesRegex(ValueError, "k must be"):
+            group_statistics(np.eye(3), k=3)
 
 
 if __name__ == "__main__":

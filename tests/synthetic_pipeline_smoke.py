@@ -96,6 +96,11 @@ def main():
         "complete_parallel_groups": True,
         "candidate_scope": "same_semantic_id_only",
     }), encoding="utf-8")
+    (output / "extraction_manifest.json").write_text(json.dumps({
+        "layers": layers,
+        "storage_dtype": "float32",
+        "representations": ["mean_pool", "sentinel_eos"],
+    }), encoding="utf-8")
 
     for script in ["compute_metrics.py", "plot_trajectories.py", "run_validations.py"]:
         subprocess.run([
