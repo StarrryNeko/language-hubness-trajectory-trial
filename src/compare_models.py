@@ -17,8 +17,8 @@ from evidence_rules import (
 VALID_CROSS_MODEL_STATUSES = {"NOT_SUPPORTED", "DENSITY_SENSITIVE", "ROBUST"}
 
 
-def classify_cross_model_without_eos(validation):
-    """Re-evaluate one model without using sentinel-EOS as a gate.
+def classify_cross_model(validation):
+    """Re-evaluate one mean-pool model under primary and density criteria.
 
     The primary layer list already includes the four-metric and source-breadth
     intersection produced by run_validations.py. Density robustness is stricter:
@@ -56,7 +56,6 @@ def classify_cross_model_without_eos(validation):
     else:
         status = "DENSITY_SENSITIVE"
 
-    eos_layers = sorted(set(map(int, evidence.get("eos_joint_layers", []))))
     return {
         "status": status,
         "source_validation_status": source_status,
@@ -67,8 +66,6 @@ def classify_cross_model_without_eos(validation):
         "density_joint_longest_run": density_run,
         "primary_density_overlap_layers": overlap_layers,
         "primary_density_overlap_longest_run": overlap_run,
-        "eos_diagnostic_layers": eos_layers,
-        "eos_diagnostic_longest_run": max_consecutive_layers(eos_layers),
         "min_consecutive_layers": minimum,
     }
 
@@ -89,8 +86,14 @@ def load_model_result(config_path):
         extraction = json.loads(extraction_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         raise ValueError(f"result JSON cannot be parsed: {error}") from error
-    cross_model_evidence = classify_cross_model_without_eos(validation)
+    cross_model_evidence = classify_cross_model(validation)
     try:
+        if extraction.get("protocol_version") != "mean_pool_no_eos_v1":
+            raise ValueError("extraction manifest is not from the active protocol")
+        if extraction.get("representations") != ["mean_pool"]:
+            raise ValueError("extraction manifest is not mean-pool-only")
+        if extraction.get("appended_eos") is not False:
+            raise ValueError("extraction manifest does not confirm appended_eos=False")
         layer_count = int(extraction["layers"])
         if layer_count < 1:
             raise ValueError("layer count must be positive")
@@ -212,7 +215,7 @@ def compare_suite(suite_path):
         "conditional_models": conditional_models,
         "replication_status": "REPLICATED" if len(robust_models) >= 2 else "NOT_REPLICATED",
         "evaluation_policy": {
-            "eos_role": "diagnostic_only_not_a_cross_model_gate",
+            "representation_protocol": "mean_pool_only_without_appended_eos",
             "primary_rule": (
                 "Four English hubness CIs and source breadth must jointly hold for "
                 "the configured minimum consecutive layers."
@@ -227,8 +230,8 @@ def compare_suite(suite_path):
             ),
         },
         "rule": (
-            "EOS is diagnostic only. Formal replication requires at least two distinct "
-            "models with same-layer primary and density-controlled evidence."
+            "Formal replication requires at least two distinct mean-pool models with "
+            "same-layer primary and density-controlled evidence."
         ),
     }
     (output / "model_comparison_verdict.json").write_text(
@@ -243,11 +246,11 @@ def main():
     args = parser.parse_args()
     verdict = compare_suite(args.suite)
     print(
-        "Primary-only comparison without EOS: "
+        "Mean-pool primary-only comparison: "
         f"{verdict['primary_only_replication_status']}"
     )
     print(
-        "Density-robust comparison without EOS: "
+        "Mean-pool density-robust comparison: "
         f"{verdict['replication_status']}"
     )
 

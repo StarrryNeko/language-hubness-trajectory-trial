@@ -44,39 +44,26 @@ def ensure_dirs(cfg):
 
 
 def representation_file_map():
-    """Canonical filenames for supported sentence representations.
-
-    ``shared_sentinel`` is retained as a read-only compatibility alias for old
-    experiments. New experiments use the clearer ``sentinel_eos`` name.
-    """
+    """Canonical filenames for the active sentence representation protocol."""
     return {
         "mean_pool": "sentence_layer_mean_pool.npy",
-        "sentinel_eos": "sentence_layer_sentinel_eos.npy",
-        "shared_sentinel": "sentence_layer_shared_sentinel.npy",
     }
 
 
 def configured_representations(cfg):
-    """Return and validate the two representations in the revised protocol."""
+    """Require mean pooling as the only active sentence representation."""
     metrics = cfg.get("metrics", {})
-    names = list(metrics.get("representations", ["mean_pool", "sentinel_eos"]))
-    allowed = {"mean_pool", "sentinel_eos"}
-    unknown = sorted(set(names) - allowed)
-    if unknown:
+    names = list(metrics.get("representations", ["mean_pool"]))
+    if names != ["mean_pool"]:
         raise ValueError(
-            "The revised protocol only supports mean_pool and sentinel_eos; "
-            f"remove: {unknown}"
+            "The active protocol computes only mean_pool; "
+            f"set metrics.representations to ['mean_pool'], got {names}"
         )
-    if len(names) != len(set(names)):
-        raise ValueError("metrics.representations contains duplicates")
-    if "mean_pool" not in names:
-        raise ValueError("mean_pool must be included as the primary sentence representation")
     primary = metrics.get("primary_representation", "mean_pool")
     if primary != "mean_pool":
-        raise ValueError("metrics.primary_representation must be mean_pool in the revised protocol")
-    validation = metrics.get("validation_representation", "sentinel_eos")
-    if validation not in names:
-        raise ValueError("metrics.validation_representation must be present in metrics.representations")
+        raise ValueError("metrics.primary_representation must be mean_pool")
+    if "validation_representation" in metrics:
+        raise ValueError("Remove metrics.validation_representation; EOS validation is disabled")
     return names
 
 

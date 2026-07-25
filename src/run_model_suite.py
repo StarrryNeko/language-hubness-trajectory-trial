@@ -80,9 +80,11 @@ def extraction_reusable(cfg):
     expected_storage = cfg.get("storage_dtype", "float16")
     expected_model = cfg.get("model", {}).get("name_or_path", cfg.get("model_name_or_path"))
     return (
-        manifest.get("model") == expected_model
+        manifest.get("protocol_version") == "mean_pool_no_eos_v1"
+        and manifest.get("model") == expected_model
         and manifest.get("storage_dtype") == expected_storage
         and manifest_representations == set(configured_representations(cfg))
+        and manifest.get("appended_eos") is False
         and truncated_inputs == 0
     )
 

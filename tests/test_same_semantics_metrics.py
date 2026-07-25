@@ -14,7 +14,7 @@ from compute_metrics import bootstrap_mean_ci, group_statistics, locally_scaled_
 class SameSemanticMetricTests(unittest.TestCase):
     def test_official_config_has_only_two_representations_and_24_languages(self):
         cfg = load_config(Path(__file__).resolve().parents[1] / "configs" / "qwen25_1_5b_mvp.json")
-        self.assertEqual(configured_representations(cfg), ["mean_pool", "sentinel_eos"])
+        self.assertEqual(configured_representations(cfg), ["mean_pool"])
         self.assertEqual(len(validate_language_inventory(cfg)), 24)
 
     def test_group_knn_conserves_total_occurrence(self):

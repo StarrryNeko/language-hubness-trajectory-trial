@@ -53,12 +53,20 @@ class EvidenceRuleTests(unittest.TestCase):
     def test_missing_real_layer_breaks_a_run(self):
         self.assertEqual(max_consecutive_layers([0, 1, 3, 4]), 2)
 
-    def test_model_status_requires_primary_breadth_and_both_controls(self):
-        self.assertEqual(classify_model_status([0, 1], [0, 1], [0, 1], [0, 1], 3)["status"], "NOT_SUPPORTED")
-        self.assertEqual(classify_model_status([0, 1, 2], [0, 1, 2], [0, 1], [0, 1, 2], 3)["status"], "REPRESENTATION_SENSITIVE")
-        result = classify_model_status([0, 1, 2], [0, 1, 2], [1, 2, 3], [2, 3, 4], 3)
+    def test_model_status_requires_same_layer_primary_breadth_and_density(self):
+        self.assertEqual(
+            classify_model_status([0, 1], [0, 1], [0, 1], 3)["status"],
+            "NOT_SUPPORTED",
+        )
+        self.assertEqual(
+            classify_model_status([0, 1, 2], [0, 1, 2], [1, 2, 3], 3)["status"],
+            "DENSITY_SENSITIVE",
+        )
+        result = classify_model_status(
+            [0, 1, 2, 3], [0, 1, 2, 3], [1, 2, 3], 3
+        )
         self.assertEqual(result["status"], "ROBUST")
-        self.assertEqual(result["primary_joint_longest_run"], 3)
+        self.assertEqual(result["primary_density_overlap_layers"], [1, 2, 3])
 
 
 if __name__ == "__main__":

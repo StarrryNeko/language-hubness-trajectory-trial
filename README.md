@@ -2,10 +2,10 @@
 
 本项目研究多语言因果语言模型中，英语是否在层间表示空间里成为 hub。当前正式协议只使用：
 
-- `mean_pool`：主表示；对原句 tokenizer 文本 token 的 hidden state 求均值，不包含额外 BOS/EOS。
-- `sentinel_eos`：验证表示；在每个句子后追加该模型原生 EOS，读取 EOS 位置 hidden state。
+- `mean_pool`：对原句 tokenizer 文本 token 的 hidden state 求均值；可选 BOS 不进入均值，输入末尾不追加 EOS。
 
-旧版的 `last_token`、`last_content_token`、`shared_sentinel` 和 `content_mean_pool` 不再参与新实验。
+旧版的 `sentinel_eos`、`last_token`、`last_content_token`、`shared_sentinel` 和
+`content_mean_pool` 不再参与新实验。
 
 模型、tokenizer 与 FLORES+ 的 Hugging Face 缓存统一配置在
 `/root/autodl-tmp/huggingface`，避免占用 AutoDL 系统盘。修改
@@ -21,7 +21,7 @@
    - 平均图中心性 `centrality_advantage`；
    - 中心性排名 `rank_percentile_advantage`；
    - 成为组内 medoid 的频率 `medoid_rate_excess`。
-5. 结论还需通过 sentinel-EOS、局部密度校正、不同 k、来源语系/文字系统覆盖和多模型复现。
+5. 正式结论要求主证据、来源广度与局部密度校正在相同连续层成立，并通过不同 k 和多模型复现。
 
 ## 默认语言与模型
 
@@ -49,7 +49,7 @@ python src/run_pilot.py --config configs/qwen25_1_5b_mvp.json
 python src/run_pilot.py --config configs/qwen25_1_5b_mvp.json --skip-prepare --skip-extract
 ```
 
-检查向量对应的原句、token 和 EOS：
+检查向量对应的原句和 token：
 
 ```bash
 python src/inspect_hidden_states.py \
@@ -85,7 +85,6 @@ python src/run_model_suite.py \
 outputs/<experiment>/
   data/dataset_manifest.json
   hidden/sentence_layer_mean_pool.npy
-  hidden/sentence_layer_sentinel_eos.npy
   metrics/metrics_manifest.json
   metrics/within_semantic_pair_similarity.csv
   metrics/within_semantic_knn.csv
@@ -94,7 +93,6 @@ outputs/<experiment>/
   metrics/english_hubness_evidence.csv
   metrics/english_source_group_attraction.csv
   metrics/english_hubness_breadth.csv
-  metrics/representation_agreement.csv
   validation/validation_summary.md
 ```
 

@@ -213,8 +213,6 @@ def main():
     global_records = []
     english_evidence_records = []
     english_source_records = []
-    pair_samples = {}
-
     for representation in representations:
         vector_path = Path(paths["hidden"]) / representation_file_map()[representation]
         vectors = np.load(vector_path, mmap_mode="r")
@@ -231,10 +229,6 @@ def main():
                 cosine = normalized @ normalized.T
                 raw_by_id[semantic_id] = validate_similarity_matrix(cosine, f"{context} cosine")
 
-            upper = np.triu_indices(len(languages), 1)
-            pair_samples[(representation, layer)] = np.concatenate([
-                raw_by_id[semantic_id][upper] for semantic_id in semantic_ids
-            ])
             for i, j in combinations(range(len(languages)), 2):
                 values = [raw_by_id[semantic_id][i, j] for semantic_id in semantic_ids]
                 pair_records.append(metric_record({
@@ -365,34 +359,7 @@ def main():
                         "k": k,
                     }, selected_values, rng, n_boot, confidence))
 
-    agreement_records = []
     primary = cfg["metrics"].get("primary_representation", "mean_pool")
-    validation = cfg["metrics"].get("validation_representation", "sentinel_eos")
-    if primary in representations and validation in representations:
-        layers = sorted({layer for rep, layer in pair_samples if rep == primary})
-        for layer in layers:
-            a = pair_samples[(primary, layer)]
-            b = pair_samples[(validation, layer)]
-            correlation = float(np.corrcoef(a, b)[0, 1]) if a.std() > 0 and b.std() > 0 else np.nan
-            primary_evidence = [
-                row for row in english_evidence_records
-                if row["representation"] == primary and row["similarity_method"] == "cosine" and row["layer"] == layer
-            ]
-            validation_evidence = [
-                row for row in english_evidence_records
-                if row["representation"] == validation and row["similarity_method"] == "cosine" and row["layer"] == layer
-            ]
-            a_values = {row["metric"]: row["mean"] for row in primary_evidence}
-            b_values = {row["metric"]: row["mean"] for row in validation_evidence}
-            agreement_records.append({
-                "layer": layer,
-                "primary_representation": primary,
-                "validation_representation": validation,
-                "pairwise_similarity_pearson": correlation,
-                "english_evidence_sign_agreement": all(
-                    np.sign(a_values[key]) == np.sign(b_values[key]) for key in a_values.keys() & b_values.keys()
-                ),
-            })
 
     source_frame = pd.DataFrame(english_source_records)
     breadth_records = []
@@ -421,7 +388,6 @@ def main():
         "english_hubness_evidence.csv": pd.DataFrame(english_evidence_records),
         "english_source_group_attraction.csv": pd.DataFrame(english_source_records),
         "english_hubness_breadth.csv": pd.DataFrame(breadth_records),
-        "representation_agreement.csv": pd.DataFrame(agreement_records),
     }
     for filename, frame in outputs.items():
         frame.to_csv(metrics_dir / filename, index=False, encoding="utf-8")
@@ -440,7 +406,7 @@ def main():
         "=== SAME-SEMANTICS MULTILINGUAL HUBNESS REPORT ===",
         f"Rows={len(meta)}; semantic_groups={len(semantic_ids)}; languages={len(languages)}; k={k}",
         "Candidate scope: same semantic ID only (cross-semantic candidates are never compared)",
-        f"Primary={primary}; EOS validation={validation}; similarity controls={methods}",
+        f"Representation={primary}; appended EOS=False; similarity controls={methods}",
         "English positive-CI layer counts: " + ", ".join(
             f"{name}={int(count)}" for name, count in supported.items()
         ),
@@ -448,11 +414,13 @@ def main():
         "English evidence peak layers: " + ", ".join(
             f"{name}={int(layer)}" for name, layer in max_layers.items()
         ),
-        "Interpretation rule: call English a hub only when k-occurrence, centrality rank/medoid evidence, "
-        "source-language breadth, and EOS/local-scaling controls agree over a stable layer interval.",
+        "Interpretation rule: call English a robust hub only when k-occurrence, centrality, "
+        "rank/medoid evidence, source-language breadth, and local-density correction agree "
+        "on the same stable layer interval.",
     ]
     (metrics_dir / "research_summary.txt").write_text("\n".join(report), encoding="utf-8")
     manifest = {
+        "protocol_version": "mean_pool_no_eos_v1",
         "candidate_scope": "same_semantic_id_only",
         "cross_semantic_similarity_computed": False,
         "semantic_groups": len(semantic_ids),
@@ -460,6 +428,7 @@ def main():
         "k": k,
         "representations": representations,
         "similarity_methods": methods,
+        "appended_eos": False,
         "bootstrap_unit": "semantic_id",
         "joint_evidence_rule": "all_four_ci_lower_gt_zero_on_same_layer",
         "output_files": list(outputs),

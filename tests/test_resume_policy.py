@@ -16,20 +16,21 @@ class ResumePolicyTests(unittest.TestCase):
             "storage_dtype": storage_dtype,
             "model": {"name_or_path": "facebook/xglm-1.7B"},
             "metrics": {
-                "representations": ["mean_pool", "sentinel_eos"],
+                "representations": ["mean_pool"],
                 "primary_representation": "mean_pool",
-                "validation_representation": "sentinel_eos",
             },
         }
 
     def write_extraction(self, root, storage_dtype):
         (root / "hidden").mkdir(parents=True)
-        for name in ("metadata.csv", "sentence_layer_mean_pool.npy", "sentence_layer_sentinel_eos.npy"):
+        for name in ("metadata.csv", "sentence_layer_mean_pool.npy"):
             (root / "hidden" / name).write_bytes(b"present")
         (root / "extraction_manifest.json").write_text(json.dumps({
+            "protocol_version": "mean_pool_no_eos_v1",
             "model": "facebook/xglm-1.7B",
             "storage_dtype": storage_dtype,
-            "representations": ["mean_pool", "sentinel_eos"],
+            "representations": ["mean_pool"],
+            "appended_eos": False,
             "truncated_inputs": 0,
         }), encoding="utf-8")
 
@@ -44,6 +45,16 @@ class ResumePolicyTests(unittest.TestCase):
             root = Path(folder)
             self.write_extraction(root, "float32")
             self.assertTrue(extraction_reusable(self.make_config(root, "float32")))
+
+    def test_old_protocol_manifest_cannot_reuse_hidden_vectors(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self.write_extraction(root, "float32")
+            manifest_path = root / "extraction_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["protocol_version"] = "mean_pool_plus_eos_v0"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            self.assertFalse(extraction_reusable(self.make_config(root, "float32")))
 
 
 if __name__ == "__main__":

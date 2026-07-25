@@ -39,9 +39,8 @@ def main():
         "metrics": {
             "english_language": "en",
             "nearest_neighbors_k": 3,
-            "representations": ["mean_pool", "sentinel_eos"],
+            "representations": ["mean_pool"],
             "primary_representation": "mean_pool",
-            "validation_representation": "sentinel_eos",
             "bootstrap_samples": 30,
             "confidence_level": 0.95,
         },
@@ -59,7 +58,6 @@ def main():
     rng = np.random.default_rng(13)
     rows = []
     mean_vectors = []
-    eos_vectors = []
     layers, dimension = 4, 48
     for semantic_number in range(8):
         semantic_id = f"s{semantic_number:03d}"
@@ -73,10 +71,8 @@ def main():
                 "lang": language,
                 "text": f"synthetic parallel sentence {semantic_id} {language}",
                 "was_truncated": False,
-                "sentinel_eos_token_id": 2,
             })
             layer_vectors = []
-            eos_layer_vectors = []
             language_offset = rng.normal(scale=0.35, size=dimension)
             if language == "en":
                 language_offset *= 0.05
@@ -84,12 +80,9 @@ def main():
                 strength = 0.2 + 0.2 * layer
                 vector = semantic + strength * language_offset
                 layer_vectors.append(vector)
-                eos_layer_vectors.append(vector + rng.normal(scale=0.02, size=dimension))
             mean_vectors.append(layer_vectors)
-            eos_vectors.append(eos_layer_vectors)
     pd.DataFrame(rows).to_csv(output / "hidden" / "metadata.csv", index=False)
     np.save(output / "hidden" / "sentence_layer_mean_pool.npy", np.asarray(mean_vectors, dtype=np.float32))
-    np.save(output / "hidden" / "sentence_layer_sentinel_eos.npy", np.asarray(eos_vectors, dtype=np.float32))
     (output / "data" / "dataset_manifest.json").write_text(json.dumps({
         "semantic_groups": 8,
         "languages_per_semantic_group": 24,
@@ -97,9 +90,11 @@ def main():
         "candidate_scope": "same_semantic_id_only",
     }), encoding="utf-8")
     (output / "extraction_manifest.json").write_text(json.dumps({
+        "protocol_version": "mean_pool_no_eos_v1",
         "layers": layers,
         "storage_dtype": "float32",
-        "representations": ["mean_pool", "sentinel_eos"],
+        "representations": ["mean_pool"],
+        "appended_eos": False,
     }), encoding="utf-8")
 
     for script in ["compute_metrics.py", "plot_trajectories.py", "run_validations.py"]:

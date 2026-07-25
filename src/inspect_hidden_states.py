@@ -56,7 +56,7 @@ def main():
     requested_representations = (
         [item.strip() for item in args.representations.split(",") if item.strip()]
         if args.representations
-        else cfg.get("metrics", {}).get("representations", ["mean_pool", "sentinel_eos"])
+        else cfg.get("metrics", {}).get("representations", ["mean_pool"])
     )
     arrays = {}
     for name in requested_representations:
@@ -83,22 +83,15 @@ def main():
         print("\n" + "-" * 88)
         print(f"row={row_idx} id={row.id} lang={row.lang}")
         print(f"sentence: {row.text}")
-        print(
-            f"sentence_tokens={getattr(row, 'sentence_num_tokens', '')} "
-            f"sentinel_eos={getattr(row, 'sentinel_eos_decoded', '')!r}"
-        )
+        print(f"sentence_tokens={getattr(row, 'sentence_num_tokens', '')}")
         record = sentence_index.get(row_idx)
         if args.show_token_sequence and record:
             for position, (token_id, token, decoded) in enumerate(
                 zip(record["token_ids"], record["tokens"], record["decoded_tokens"])
             ):
-                markers = []
-                sentinel_position = record.get("sentinel_eos_position")
-                if sentinel_position != "" and position == int(sentinel_position):
-                    markers.append("SENTINEL_EOS")
                 print(
                     f"  token[{position:03d}] id={token_id:<8} raw={token!r:<22} "
-                    f"decoded={decoded!r} {' '.join(markers)}"
+                    f"decoded={decoded!r}"
                 )
         for name, values in arrays.items():
             for layer in layers:

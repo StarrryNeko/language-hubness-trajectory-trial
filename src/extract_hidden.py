@@ -39,7 +39,7 @@ def get_dtype(name):
 
 
 def masked_mean(hidden, attention_mask):
-    """Mean over original non-padding sentence positions, excluding appended EOS."""
+    """Mean over original non-padding sentence positions."""
     mask = attention_mask.to(hidden.device, dtype=hidden.dtype).unsqueeze(-1)
     return (hidden * mask).sum(dim=0) / mask.sum().clamp_min(1.0)
 
@@ -78,7 +78,7 @@ def print_sentence_audit(meta_rows, mode, preview_per_language):
     for row in selected:
         print(
             f"row={row['row_idx']:05d} id={row['id']} lang={row['lang']} "
-            f"sentence_tokens={row['sentence_num_tokens']} eos={row['sentinel_eos_decoded']!r}"
+            f"sentence_tokens={row['sentence_num_tokens']}"
         )
         print(f"  sentence: {row['text']}")
 
@@ -101,8 +101,8 @@ def main():
     dtype = get_dtype(cfg.get("dtype", "float16"))
     device = cfg.get("device", "cuda")
     max_length = int(cfg.get("max_length", 128))
-    if max_length < 2:
-        raise ValueError("max_length must leave room for sentence text and one sentinel EOS")
+    if max_length < 1:
+        raise ValueError("max_length must leave room for sentence text")
 
     tokenizer_kwargs = {"trust_remote_code": settings["trust_remote_code"]}
     if settings["cache_dir"]:
@@ -110,18 +110,12 @@ def main():
     if settings["revision"]:
         tokenizer_kwargs["revision"] = settings["revision"]
     tokenizer = AutoTokenizer.from_pretrained(settings["tokenizer"], **tokenizer_kwargs)
-    eos_token_id = cfg.get("representation_controls", {}).get("sentinel_eos_token_id")
-    eos_token_id = tokenizer.eos_token_id if eos_token_id is None else int(eos_token_id)
-    if eos_token_id is None:
-        raise ValueError("sentinel_eos requires a tokenizer EOS token or sentinel_eos_token_id override")
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token_id = eos_token_id
     controls = cfg.get("representation_controls", {})
     prepend_bos = bool(controls.get("prepend_bos_when_available", True)) and tokenizer.bos_token_id is not None
-    reserved_positions = 1 + int(prepend_bos)
+    reserved_positions = int(prepend_bos)
     text_max_length = max_length - reserved_positions
     if text_max_length < 1:
-        raise ValueError("max_length must leave space for text plus BOS/EOS controls")
+        raise ValueError("max_length must leave space for text after the optional BOS")
 
     load_kwargs = {
         "dtype": dtype,
@@ -151,7 +145,7 @@ def main():
     index_rows = []
 
     with torch.inference_mode():
-        for row_idx, row in enumerate(tqdm(rows, desc="Extracting mean-pool + EOS vectors")):
+        for row_idx, row in enumerate(tqdm(rows, desc="Extracting mean-pool vectors")):
             encoded = tokenizer(
                 row["text"],
                 return_tensors="pt",
@@ -170,8 +164,7 @@ def main():
                 torch.tensor([[tokenizer.bos_token_id]], dtype=text_ids.dtype)
                 if prepend_bos else torch.empty((1, 0), dtype=text_ids.dtype)
             )
-            eos = torch.tensor([[eos_token_id]], dtype=text_ids.dtype)
-            model_ids = torch.cat([prefix, text_ids, eos], dim=1)
+            model_ids = torch.cat([prefix, text_ids], dim=1)
             model_inputs = {
                 "input_ids": model_ids,
                 "attention_mask": torch.ones_like(model_ids),
@@ -203,13 +196,6 @@ def main():
                         f"{context_base} representation=mean_pool before_storage",
                     )
                     per_rep["mean_pool"].append(mean_vector)
-                if "sentinel_eos" in per_rep:
-                    eos_vector = hidden[int(prepend_bos) + text_length].float().cpu().numpy()
-                    require_nonzero_row_norms(
-                        eos_vector,
-                        f"{context_base} representation=sentinel_eos before_storage",
-                    )
-                    per_rep["sentinel_eos"].append(eos_vector)
             for name, layer_vectors in per_rep.items():
                 stored = np.stack(layer_vectors).astype(storage_dtype, copy=False)
                 for layer, stored_vector in enumerate(stored):
@@ -234,9 +220,6 @@ def main():
                 "was_truncated": bool(full_length > text_max_length),
                 "prepended_bos": prepend_bos,
                 "bos_token_id": int(tokenizer.bos_token_id) if prepend_bos else "",
-                "sentinel_eos_position": int(prepend_bos) + text_length,
-                "sentinel_eos_token_id": int(eos_token_id),
-                "sentinel_eos_decoded": decoded_token(tokenizer, eos_token_id),
             }
             meta_rows.append(meta)
             index_rows.append({
@@ -268,6 +251,7 @@ def main():
     truncated = sum(row["was_truncated"] for row in meta_rows)
     peak_gpu = torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
     manifest = {
+        "protocol_version": "mean_pool_no_eos_v1",
         "model": settings["name"],
         "tokenizer": settings["tokenizer"],
         "huggingface_cache_dir": settings["cache_dir"],
@@ -278,13 +262,10 @@ def main():
         "hidden_dim": int(first_shape[2]),
         "representations": representations,
         "primary_representation": "mean_pool",
-        "validation_representation": cfg["metrics"].get("validation_representation", "sentinel_eos"),
-        "sentinel_eos_token_id": int(eos_token_id),
-        "sentinel_eos_decoded": decoded_token(tokenizer, eos_token_id),
         "prepend_bos_when_available": prepend_bos,
         "text_tokenization_add_special_tokens": False,
         "text_max_length": text_max_length,
-        "mean_pool_excludes_appended_eos": True,
+        "appended_eos": False,
         "mean_pool_excludes_prepended_bos": True,
         "candidate_scope": "same_semantic_id_only",
         "storage_dtype": storage_dtype_name,

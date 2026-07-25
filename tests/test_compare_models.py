@@ -39,22 +39,33 @@ class CompareModelTests(unittest.TestCase):
         ]
         pd.DataFrame(rows).to_csv(output / "metrics" / "english_hubness_evidence.csv", index=False)
         primary_layers = [0, 1] if status == "NOT_SUPPORTED" else [0, 1, 2]
-        eos_layers = [0, 1] if status == "REPRESENTATION_SENSITIVE" else [0, 1, 2]
         density_layers = [0, 1, 2] if density_layers is None else density_layers
+        overlap_layers = sorted(set(primary_layers) & set(density_layers))
+        if len(primary_layers) < 3:
+            status = "NOT_SUPPORTED"
+        elif len(overlap_layers) < 3:
+            status = "DENSITY_SENSITIVE"
+        else:
+            status = "ROBUST"
         (output / "validation" / "validation_summary.json").write_text(json.dumps({
             "model_status": status,
             "joint_evidence": {
                 "status": status,
                 "primary_joint_layers": primary_layers,
                 "primary_joint_longest_run": len(primary_layers),
-                "eos_joint_layers": eos_layers,
-                "eos_joint_longest_run": len(eos_layers),
                 "density_joint_layers": density_layers,
                 "density_joint_longest_run": len(density_layers),
+                "primary_density_overlap_layers": overlap_layers,
+                "primary_density_overlap_longest_run": len(overlap_layers),
                 "min_consecutive_layers": 3,
             },
         }), encoding="utf-8")
-        (output / "extraction_manifest.json").write_text(json.dumps({"layers": 3}), encoding="utf-8")
+        (output / "extraction_manifest.json").write_text(json.dumps({
+            "protocol_version": "mean_pool_no_eos_v1",
+            "layers": 3,
+            "representations": ["mean_pool"],
+            "appended_eos": False,
+        }), encoding="utf-8")
         config = {
             "experiment_name": f"experiment_{number}",
             "model": {"name_or_path": f"model/{number}"},
@@ -85,12 +96,12 @@ class CompareModelTests(unittest.TestCase):
             summary = pd.read_csv(root / "comparison" / "model_comparison_summary.csv")
             self.assertNotIn("model/3", set(summary.model))
 
-    def test_eos_sensitive_model_can_replicate_when_density_is_robust(self):
+    def test_mean_pool_validation_payload_needs_no_secondary_representation(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             configs = [
                 self.write_model(root, 1),
-                self.write_model(root, 2, status="REPRESENTATION_SENSITIVE"),
+                self.write_model(root, 2),
             ]
             suite = root / "suite.json"
             suite.write_text(json.dumps({
@@ -101,12 +112,12 @@ class CompareModelTests(unittest.TestCase):
             self.assertEqual(verdict["replication_status"], "REPLICATED")
             self.assertEqual(
                 verdict["model_statuses"][1]["source_validation_status"],
-                "REPRESENTATION_SENSITIVE",
+                "ROBUST",
             )
             self.assertEqual(verdict["model_statuses"][1]["status"], "ROBUST")
             self.assertEqual(
-                verdict["evaluation_policy"]["eos_role"],
-                "diagnostic_only_not_a_cross_model_gate",
+                verdict["evaluation_policy"]["representation_protocol"],
+                "mean_pool_only_without_appended_eos",
             )
 
     def test_primary_only_replication_is_reported_separately_from_density_robustness(self):

@@ -73,15 +73,13 @@
   "metrics": {
     "english_language": "en",
     "nearest_neighbors_k": 5,
-    "representations": ["mean_pool", "sentinel_eos"],
+    "representations": ["mean_pool"],
     "primary_representation": "mean_pool",
-    "validation_representation": "sentinel_eos",
     "bootstrap_samples": 500,
     "confidence_level": 0.95,
     "min_consecutive_layers": 3
   },
   "representation_controls": {
-    "append_sentinel_eos": true,
     "prepend_bos_when_available": true
   },
   "similarity_controls": {

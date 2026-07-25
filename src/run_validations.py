@@ -83,13 +83,27 @@ def main():
     extraction_ok = metadata_path.exists()
     extraction_evidence = []
     extraction_layer_counts = set()
+    extraction_manifest_path = Path(paths["output"]) / "extraction_manifest.json"
+    if extraction_manifest_path.exists():
+        extraction_manifest = json.loads(extraction_manifest_path.read_text(encoding="utf-8"))
+        protocol_ok = (
+            extraction_manifest.get("protocol_version") == "mean_pool_no_eos_v1"
+            and extraction_manifest.get("representations") == ["mean_pool"]
+            and extraction_manifest.get("appended_eos") is False
+        )
+        extraction_ok &= protocol_ok
+        extraction_evidence.append(
+            "Extraction protocol: "
+            f"representations={extraction_manifest.get('representations')}, "
+            f"appended_eos={extraction_manifest.get('appended_eos')}"
+        )
+    else:
+        extraction_ok = False
+        extraction_evidence.append("extraction_manifest.json is missing")
     if extraction_ok:
         meta = pd.read_csv(metadata_path)
         extraction_evidence.append(f"Metadata rows={len(meta)}")
         extraction_ok &= not meta.was_truncated.astype(str).str.lower().isin({"true", "1", "yes"}).any()
-        eos_ids = meta.sentinel_eos_token_id.nunique()
-        extraction_ok &= eos_ids == 1
-        extraction_evidence.append(f"Unique sentinel EOS IDs={eos_ids}")
         for name in reps:
             path = hidden / representation_file_map()[name]
             if not path.exists():
@@ -118,8 +132,8 @@ def main():
     else:
         expected_metric_layers = list(range(next(iter(extraction_layer_counts))))
     reports.append(report(
-        "Mean-pool and sentinel-EOS extraction", "PASS" if extraction_ok else "FAIL",
-        "Verify that only the two approved representations exist in the active config, EOS is identical within a model, and arrays are finite/aligned.",
+        "Mean-pool extraction without appended EOS", "PASS" if extraction_ok else "FAIL",
+        "Verify that mean_pool is the only representation, no EOS vector is required, and the array is finite and aligned.",
         extraction_evidence,
         "Sentence representations follow the revised protocol." if extraction_ok else "Extraction is unsafe.",
         [] if extraction_ok else ["Rerun extract_hidden.py before computing metrics."],
@@ -128,14 +142,19 @@ def main():
     if metric_manifest_path.exists():
         metric_manifest = json.loads(metric_manifest_path.read_text(encoding="utf-8"))
         isolated = (
-            metric_manifest.get("candidate_scope") == "same_semantic_id_only"
+            metric_manifest.get("protocol_version") == "mean_pool_no_eos_v1"
+            and metric_manifest.get("candidate_scope") == "same_semantic_id_only"
             and metric_manifest.get("cross_semantic_similarity_computed") is False
             and metric_manifest.get("bootstrap_unit") == "semantic_id"
+            and metric_manifest.get("representations") == ["mean_pool"]
+            and metric_manifest.get("appended_eos") is False
         )
         isolation_evidence = [
             f"candidate_scope={metric_manifest.get('candidate_scope')}",
             f"cross_semantic_similarity_computed={metric_manifest.get('cross_semantic_similarity_computed')}",
             f"bootstrap_unit={metric_manifest.get('bootstrap_unit')}",
+            f"representations={metric_manifest.get('representations')}",
+            f"appended_eos={metric_manifest.get('appended_eos')}",
         ]
     else:
         isolated, isolation_evidence = False, ["metrics_manifest.json is missing"]
@@ -151,11 +170,11 @@ def main():
     hub_evidence = ["english_hubness_evidence.csv is missing"]
     min_run = int(cfg["metrics"].get("min_consecutive_layers", 3))
     primary = cfg["metrics"].get("primary_representation", "mean_pool")
-    validation_representation = cfg["metrics"].get("validation_representation", "sentinel_eos")
     primary_joint_layers = []
+    primary_supported_layers = []
     broad_layer_numbers = []
-    eos_joint_layers = []
     density_joint_layers = []
+    primary_density_overlap_layers = []
     evidence_error = None
     frame = None
     if evidence_path.exists():
@@ -186,13 +205,15 @@ def main():
                 & (breadth.supported_non_latin_languages >= 3)
             )
             broad_layer_numbers = breadth.loc[broad, "layer"].astype(int).tolist()
-            primary_with_breadth = sorted(set(primary_joint_layers) & set(broad_layer_numbers))
-            primary_run = max_consecutive_layers(primary_with_breadth)
+            primary_supported_layers = sorted(
+                set(primary_joint_layers) & set(broad_layer_numbers)
+            )
+            primary_run = max_consecutive_layers(primary_supported_layers)
             hub_status = "PASS" if primary_run >= min_run else "WARN"
             hub_evidence = [
                 f"Four-metric joint-positive layers={primary_joint_layers}",
                 f"Broad-source layers={broad_layer_numbers}",
-                f"Joint evidence + breadth layers={primary_with_breadth}; longest run={primary_run}; required={min_run}",
+                f"Joint evidence + breadth layers={primary_supported_layers}; longest run={primary_run}; required={min_run}",
             ]
         except (KeyError, TypeError, ValueError) as error:
             evidence_error = str(error)
@@ -202,36 +223,6 @@ def main():
         "Require English to exceed the balanced null in reverse-kNN occurrence, centrality, rank, and medoid rate, with support from at least half of source languages and multiple scripts; proximity alone is insufficient.",
         hub_evidence,
         "All four dimensions contain some supported layers." if hub_status == "PASS" else "Do not make a general English-hub claim yet.",
-    ))
-
-    agreement_path = metrics / "representation_agreement.csv"
-    agreement_status = "FAIL"
-    agreement_evidence = ["English evidence is missing"]
-    if frame is not None:
-        try:
-            eos = frame[
-                (frame.representation == validation_representation)
-                & (frame.similarity_method == "cosine")
-            ]
-            eos_joint_layers = joint_positive_layers(eos, expected_layers=expected_metric_layers)
-            eos_run = max_consecutive_layers(eos_joint_layers)
-            agreement_status = "PASS" if eos_run >= min_run else "WARN"
-            agreement_evidence = [
-                f"Four-metric joint-positive EOS layers={eos_joint_layers}",
-                f"Longest run={eos_run}; required={min_run}",
-            ]
-            if agreement_path.exists():
-                agree = pd.read_csv(agreement_path)
-                median_r = float(agree.pairwise_similarity_pearson.median())
-                agreement_evidence.append(f"Secondary pair-geometry median Pearson r={median_r:.3f}")
-        except (KeyError, TypeError, ValueError) as error:
-            evidence_error = evidence_error or str(error)
-            agreement_evidence = [f"Invalid EOS evidence: {error}"]
-    reports.append(report(
-        "Sentinel-EOS validation", agreement_status,
-        "Compare layer-wise English evidence signs and all within-semantics language-pair similarities between mean pooling and sentinel EOS.",
-        agreement_evidence,
-        "EOS broadly validates the mean-pool trajectory." if agreement_status == "PASS" else "The result is representation-sensitive.",
     ))
 
     global_path = metrics / "hubness_global.csv"
@@ -267,10 +258,16 @@ def main():
             ]
             density_joint_layers = joint_positive_layers(scaled, expected_layers=expected_metric_layers)
             density_run = max_consecutive_layers(density_joint_layers)
-            density_status = "PASS" if density_run >= min_run else "WARN"
+            primary_density_overlap_layers = sorted(
+                set(primary_supported_layers) & set(density_joint_layers)
+            )
+            overlap_run = max_consecutive_layers(primary_density_overlap_layers)
+            density_status = "PASS" if overlap_run >= min_run else "WARN"
             density_evidence = [
                 f"Four-metric joint-positive local-scaled layers={density_joint_layers}",
-                f"Longest run={density_run}; required={min_run}",
+                f"Local-scaled longest run={density_run}",
+                f"Primary + breadth + density overlap layers={primary_density_overlap_layers}; "
+                f"longest run={overlap_run}; required={min_run}",
             ]
         except (KeyError, TypeError, ValueError) as error:
             evidence_error = evidence_error or str(error)
@@ -280,7 +277,7 @@ def main():
         density_status, density_evidence = "FAIL", ["English evidence is missing"]
     reports.append(report(
         "Local-density hubness control", density_status,
-        "Re-rank only the same semantic group with a CSLS-style local density correction and compare evidence signs.",
+        "Require the four primary metrics, source breadth, and CSLS-style local-density correction to hold on the same consecutive layers.",
         density_evidence,
         "English evidence is not solely a local-density artifact." if density_status == "PASS" else "Density correction changes the conclusion.",
     ))
@@ -300,7 +297,7 @@ def main():
 
     slugs = [
         "dataset", "representations", "semantic_scope", "hubness_evidence",
-        "eos_validation", "tie_geometry", "density_control", "k_robustness",
+        "tie_geometry", "density_control", "k_robustness",
     ]
     stems = [write_report(validation, i, slug, payload) for i, (slug, payload) in enumerate(zip(slugs, reports), 1)]
     overall = max(reports, key=lambda item: ORDER[item["status"]])["status"]
@@ -312,15 +309,14 @@ def main():
             "status": "INVALID",
             "reason": evidence_error or "required dataset/extraction/metric validation failed",
             "primary_joint_layers": primary_joint_layers,
-            "eos_joint_layers": eos_joint_layers,
             "density_joint_layers": density_joint_layers,
+            "primary_density_overlap_layers": primary_density_overlap_layers,
             "min_consecutive_layers": min_run,
         }
     else:
         model_rule = classify_model_status(
             primary_joint_layers,
             broad_layer_numbers,
-            eos_joint_layers,
             density_joint_layers,
             min_run,
         )
@@ -329,7 +325,7 @@ def main():
         "model_status": model_rule["status"],
         "joint_evidence": model_rule,
         "reports": [{"file_stem": stem, "name": item["name"], "status": item["status"]} for stem, item in zip(stems, reports)],
-        "claim_rule": "English hubness requires convergent reverse-kNN, centrality/rank, medoid, source-breadth, EOS, density, k, and multi-model evidence.",
+        "claim_rule": "English hubness requires same-layer reverse-kNN, centrality/rank, medoid, source-breadth, local-density, k, and multi-model evidence; EOS is not computed.",
     }
     (validation / "validation_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     lines = [

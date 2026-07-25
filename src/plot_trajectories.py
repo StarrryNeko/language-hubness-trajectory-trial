@@ -63,16 +63,16 @@ def main():
     generated.append(figures / "hubness_occurrence_by_language.png")
     save(generated[-1])
 
-    controls = by_language = pd.read_csv(metrics / "english_hubness_evidence.csv")
+    controls = pd.read_csv(metrics / "english_hubness_evidence.csv")
     controls = controls[
-        (controls.representation.isin([primary, cfg["metrics"].get("validation_representation", "sentinel_eos")]))
+        (controls.representation == primary)
         & (controls.metric == "k_occurrence_excess")
     ]
-    controls["control"] = controls.representation + " / " + controls.similarity_method
+    controls["control"] = controls.similarity_method
     plt.figure(figsize=(10, 6))
     sns.lineplot(data=controls, x="layer", y="mean", hue="control", marker="o", errorbar=None)
     plt.axhline(0, color="black", linestyle="--", linewidth=1)
-    plt.title("English Hubness under EOS and Local-density Controls")
+    plt.title("English Hubness under Cosine and Local-density Control")
     plt.ylabel("English k-occurrence minus balanced expectation")
     generated.append(figures / "english_hubness_controls.png")
     save(generated[-1])
@@ -91,16 +91,6 @@ def main():
     plt.ylabel("P(English is in same-semantics top-k)")
     plt.legend(ncol=2, fontsize=8)
     generated.append(figures / "english_attraction_by_source_script.png")
-    save(generated[-1])
-
-    agreement = pd.read_csv(metrics / "representation_agreement.csv")
-    plt.figure(figsize=(9, 5))
-    sns.lineplot(data=agreement, x="layer", y="pairwise_similarity_pearson", marker="o")
-    plt.axhline(0, color="black", linestyle="--", linewidth=1)
-    plt.ylim(-1.05, 1.05)
-    plt.title("Mean-pool vs Sentinel-EOS Geometry Agreement")
-    plt.ylabel("Pearson r over within-semantics language pairs")
-    generated.append(figures / "representation_agreement.png")
     save(generated[-1])
 
     pair = pd.read_csv(metrics / "within_semantic_pair_similarity.csv")

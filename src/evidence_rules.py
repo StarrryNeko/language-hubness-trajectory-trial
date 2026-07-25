@@ -13,7 +13,7 @@ REQUIRED_EVIDENCE_METRICS = (
 MODEL_STATUSES = {
     "INVALID",
     "NOT_SUPPORTED",
-    "REPRESENTATION_SENSITIVE",
+    "DENSITY_SENSITIVE",
     "ROBUST",
 }
 
@@ -79,28 +79,30 @@ def max_consecutive_layers(layers):
     return best
 
 
-def classify_model_status(primary_layers, breadth_layers, eos_layers, density_layers, min_run):
+def classify_model_status(primary_layers, breadth_layers, density_layers, min_run):
     min_run = int(min_run)
     if min_run < 1:
         raise ValueError("min_run must be at least 1")
     primary_joint = sorted(set(map(int, primary_layers)) & set(map(int, breadth_layers)))
     primary_run = max_consecutive_layers(primary_joint)
-    eos_run = max_consecutive_layers(eos_layers)
+    density_layers = sorted(set(map(int, density_layers)))
     density_run = max_consecutive_layers(density_layers)
+    overlap_layers = sorted(set(primary_joint) & set(density_layers))
+    overlap_run = max_consecutive_layers(overlap_layers)
     if primary_run < min_run:
         status = "NOT_SUPPORTED"
-    elif eos_run >= min_run and density_run >= min_run:
+    elif overlap_run >= min_run:
         status = "ROBUST"
     else:
-        status = "REPRESENTATION_SENSITIVE"
+        status = "DENSITY_SENSITIVE"
     return {
         "status": status,
         "primary_joint_layers": primary_joint,
         "primary_joint_longest_run": primary_run,
-        "eos_joint_layers": sorted(set(map(int, eos_layers))),
-        "eos_joint_longest_run": eos_run,
-        "density_joint_layers": sorted(set(map(int, density_layers))),
+        "density_joint_layers": density_layers,
         "density_joint_longest_run": density_run,
+        "primary_density_overlap_layers": overlap_layers,
+        "primary_density_overlap_longest_run": overlap_run,
         "min_consecutive_layers": min_run,
     }
 
@@ -115,8 +117,8 @@ def validate_model_status_payload(summary):
     if status == "INVALID":
         return status
     required = {
-        "status", "primary_joint_longest_run", "eos_joint_longest_run",
-        "density_joint_longest_run", "min_consecutive_layers",
+        "status", "primary_joint_longest_run", "density_joint_longest_run",
+        "primary_density_overlap_longest_run", "min_consecutive_layers",
     }
     missing = required - set(evidence)
     if missing:
@@ -125,14 +127,14 @@ def validate_model_status_payload(summary):
         raise ValueError("validation model_status disagrees with joint_evidence.status")
     minimum = int(evidence["min_consecutive_layers"])
     primary = int(evidence["primary_joint_longest_run"])
-    eos = int(evidence["eos_joint_longest_run"])
     density = int(evidence["density_joint_longest_run"])
-    if minimum < 1 or min(primary, eos, density) < 0:
+    overlap = int(evidence["primary_density_overlap_longest_run"])
+    if minimum < 1 or min(primary, density, overlap) < 0:
         raise ValueError("validation joint-run lengths and minimum are out of range")
     expected = (
         "NOT_SUPPORTED" if primary < minimum else
-        "ROBUST" if eos >= minimum and density >= minimum else
-        "REPRESENTATION_SENSITIVE"
+        "ROBUST" if overlap >= minimum else
+        "DENSITY_SENSITIVE"
     )
     if status != expected:
         raise ValueError(
