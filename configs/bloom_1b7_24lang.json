@@ -5,5 +5,7 @@
     "name_or_path": "bigscience/bloom-1b7",
     "trust_remote_code": false
   },
+  "dtype": "float32",
+  "storage_dtype": "float32",
   "output_dir": "outputs/bloom_1b7_24lang"
 }

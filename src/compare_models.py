@@ -8,12 +8,69 @@ import pandas as pd
 
 from common import load_config
 from evidence_rules import (
-    MODEL_STATUSES,
     REQUIRED_EVIDENCE_METRICS,
     max_consecutive_layers,
     validate_evidence_grid,
-    validate_model_status_payload,
 )
+
+
+VALID_CROSS_MODEL_STATUSES = {"NOT_SUPPORTED", "DENSITY_SENSITIVE", "ROBUST"}
+
+
+def classify_cross_model_without_eos(validation):
+    """Re-evaluate one model without using sentinel-EOS as a gate.
+
+    The primary layer list already includes the four-metric and source-breadth
+    intersection produced by run_validations.py. Density robustness is stricter:
+    primary and local-scaled evidence must hold on the same consecutive layers.
+    """
+    source_status = validation.get("model_status")
+    evidence = validation.get("joint_evidence")
+    if source_status == "INVALID":
+        reason = evidence.get("reason") if isinstance(evidence, dict) else None
+        raise ValueError(reason or "model validation marked INVALID")
+    if not isinstance(evidence, dict):
+        raise ValueError("validation joint_evidence is missing or invalid")
+    required = {
+        "primary_joint_layers",
+        "density_joint_layers",
+        "min_consecutive_layers",
+    }
+    missing = required - set(evidence)
+    if missing:
+        raise ValueError(f"validation joint_evidence is missing fields: {sorted(missing)}")
+
+    minimum = int(evidence["min_consecutive_layers"])
+    if minimum < 1:
+        raise ValueError("min_consecutive_layers must be at least 1")
+    primary_layers = sorted(set(map(int, evidence["primary_joint_layers"])))
+    density_layers = sorted(set(map(int, evidence["density_joint_layers"])))
+    overlap_layers = sorted(set(primary_layers) & set(density_layers))
+    primary_run = max_consecutive_layers(primary_layers)
+    density_run = max_consecutive_layers(density_layers)
+    overlap_run = max_consecutive_layers(overlap_layers)
+    if primary_run < minimum:
+        status = "NOT_SUPPORTED"
+    elif overlap_run >= minimum:
+        status = "ROBUST"
+    else:
+        status = "DENSITY_SENSITIVE"
+
+    eos_layers = sorted(set(map(int, evidence.get("eos_joint_layers", []))))
+    return {
+        "status": status,
+        "source_validation_status": source_status,
+        "primary_supported": primary_run >= minimum,
+        "primary_joint_layers": primary_layers,
+        "primary_joint_longest_run": primary_run,
+        "density_joint_layers": density_layers,
+        "density_joint_longest_run": density_run,
+        "primary_density_overlap_layers": overlap_layers,
+        "primary_density_overlap_longest_run": overlap_run,
+        "eos_diagnostic_layers": eos_layers,
+        "eos_diagnostic_longest_run": max_consecutive_layers(eos_layers),
+        "min_consecutive_layers": minimum,
+    }
 
 
 def load_model_result(config_path):
@@ -32,10 +89,7 @@ def load_model_result(config_path):
         extraction = json.loads(extraction_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         raise ValueError(f"result JSON cannot be parsed: {error}") from error
-    status = validate_model_status_payload(validation)
-    if status == "INVALID":
-        reason = validation.get("joint_evidence", {}).get("reason", "model validation marked INVALID")
-        raise ValueError(reason)
+    cross_model_evidence = classify_cross_model_without_eos(validation)
     try:
         layer_count = int(extraction["layers"])
         if layer_count < 1:
@@ -57,7 +111,7 @@ def load_model_result(config_path):
     return frame, {
         "model": model_name,
         "experiment_name": experiment,
-        "status": status,
+        **cross_model_evidence,
         "reason": None,
     }
 
@@ -137,19 +191,45 @@ def compare_suite(suite_path):
         fig.savefig(output / "model_hubness_comparison.png", dpi=180)
         plt.close(fig)
 
+    primary_supported_models = sorted({
+        row["model"] for row in model_statuses if row.get("primary_supported") is True
+    })
     robust_models = sorted({row["model"] for row in model_statuses if row["status"] == "ROBUST"})
     conditional_models = sorted({
-        row["model"] for row in model_statuses if row["status"] == "REPRESENTATION_SENSITIVE"
+        row["model"] for row in model_statuses if row["status"] == "DENSITY_SENSITIVE"
     })
-    valid_statuses = MODEL_STATUSES - {"INVALID"}
     verdict = {
         "models_compared": [row["model"] for row in model_statuses],
         "model_statuses": model_statuses,
-        "valid_model_count": sum(row["status"] in valid_statuses for row in model_statuses),
+        "valid_model_count": sum(
+            row["status"] in VALID_CROSS_MODEL_STATUSES for row in model_statuses
+        ),
+        "primary_supported_models": primary_supported_models,
+        "primary_only_replication_status": (
+            "REPLICATED" if len(primary_supported_models) >= 2 else "NOT_REPLICATED"
+        ),
         "robust_models": robust_models,
         "conditional_models": conditional_models,
         "replication_status": "REPLICATED" if len(robust_models) >= 2 else "NOT_REPLICATED",
-        "rule": "At least two models must independently be ROBUST under joint four-metric, breadth, EOS, and density-control rules; INVALID models are excluded.",
+        "evaluation_policy": {
+            "eos_role": "diagnostic_only_not_a_cross_model_gate",
+            "primary_rule": (
+                "Four English hubness CIs and source breadth must jointly hold for "
+                "the configured minimum consecutive layers."
+            ),
+            "density_robust_rule": (
+                "Primary and local-scaled four-metric evidence must overlap on the "
+                "same configured minimum consecutive layers."
+            ),
+            "cross_model_rule": (
+                "At least two distinct models must satisfy the density-robust rule; "
+                "INVALID models are excluded."
+            ),
+        },
+        "rule": (
+            "EOS is diagnostic only. Formal replication requires at least two distinct "
+            "models with same-layer primary and density-controlled evidence."
+        ),
     }
     (output / "model_comparison_verdict.json").write_text(
         json.dumps(verdict, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -162,7 +242,14 @@ def main():
     parser.add_argument("--suite", required=True)
     args = parser.parse_args()
     verdict = compare_suite(args.suite)
-    print(f"Model comparison: {verdict['replication_status']}")
+    print(
+        "Primary-only comparison without EOS: "
+        f"{verdict['primary_only_replication_status']}"
+    )
+    print(
+        "Density-robust comparison without EOS: "
+        f"{verdict['replication_status']}"
+    )
 
 
 if __name__ == "__main__":

@@ -13,7 +13,14 @@ from evidence_rules import REQUIRED_EVIDENCE_METRICS
 
 
 class CompareModelTests(unittest.TestCase):
-    def write_model(self, root, number, status="ROBUST", invalid_value=None):
+    def write_model(
+        self,
+        root,
+        number,
+        status="ROBUST",
+        invalid_value=None,
+        density_layers=None,
+    ):
         output = root / f"output_{number}"
         (output / "metrics").mkdir(parents=True)
         (output / "validation").mkdir()
@@ -31,15 +38,19 @@ class CompareModelTests(unittest.TestCase):
             for metric in REQUIRED_EVIDENCE_METRICS
         ]
         pd.DataFrame(rows).to_csv(output / "metrics" / "english_hubness_evidence.csv", index=False)
-        primary_run = 2 if status == "NOT_SUPPORTED" else 3
-        eos_run = 2 if status == "REPRESENTATION_SENSITIVE" else 3
+        primary_layers = [0, 1] if status == "NOT_SUPPORTED" else [0, 1, 2]
+        eos_layers = [0, 1] if status == "REPRESENTATION_SENSITIVE" else [0, 1, 2]
+        density_layers = [0, 1, 2] if density_layers is None else density_layers
         (output / "validation" / "validation_summary.json").write_text(json.dumps({
             "model_status": status,
             "joint_evidence": {
                 "status": status,
-                "primary_joint_longest_run": primary_run,
-                "eos_joint_longest_run": eos_run,
-                "density_joint_longest_run": 3,
+                "primary_joint_layers": primary_layers,
+                "primary_joint_longest_run": len(primary_layers),
+                "eos_joint_layers": eos_layers,
+                "eos_joint_longest_run": len(eos_layers),
+                "density_joint_layers": density_layers,
+                "density_joint_longest_run": len(density_layers),
                 "min_consecutive_layers": 3,
             },
         }), encoding="utf-8")
@@ -74,7 +85,7 @@ class CompareModelTests(unittest.TestCase):
             summary = pd.read_csv(root / "comparison" / "model_comparison_summary.csv")
             self.assertNotIn("model/3", set(summary.model))
 
-    def test_representation_sensitive_model_does_not_trigger_replication(self):
+    def test_eos_sensitive_model_can_replicate_when_density_is_robust(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             configs = [
@@ -87,7 +98,36 @@ class CompareModelTests(unittest.TestCase):
                 "comparison_output_dir": str(root / "comparison"),
             }), encoding="utf-8")
             verdict = compare_suite(suite)
+            self.assertEqual(verdict["replication_status"], "REPLICATED")
+            self.assertEqual(
+                verdict["model_statuses"][1]["source_validation_status"],
+                "REPRESENTATION_SENSITIVE",
+            )
+            self.assertEqual(verdict["model_statuses"][1]["status"], "ROBUST")
+            self.assertEqual(
+                verdict["evaluation_policy"]["eos_role"],
+                "diagnostic_only_not_a_cross_model_gate",
+            )
+
+    def test_primary_only_replication_is_reported_separately_from_density_robustness(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            configs = [
+                self.write_model(root, 1, density_layers=[0, 1]),
+                self.write_model(root, 2, density_layers=[]),
+            ]
+            suite = root / "suite.json"
+            suite.write_text(json.dumps({
+                "configs": configs,
+                "comparison_output_dir": str(root / "comparison"),
+            }), encoding="utf-8")
+            verdict = compare_suite(suite)
+            self.assertEqual(verdict["primary_only_replication_status"], "REPLICATED")
             self.assertEqual(verdict["replication_status"], "NOT_REPLICATED")
+            self.assertEqual(
+                [row["status"] for row in verdict["model_statuses"]],
+                ["DENSITY_SENSITIVE", "DENSITY_SENSITIVE"],
+            )
 
     def test_missing_validation_and_duplicate_grid_are_invalid(self):
         with tempfile.TemporaryDirectory() as folder:
