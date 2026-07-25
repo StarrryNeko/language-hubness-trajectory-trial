@@ -23,6 +23,12 @@ class NumericalValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "zero/near-zero"):
             require_nonzero_row_norms([[1.0, 0.0], [0.0, 0.0]], "semantic=s1")
 
+    def test_finite_float16_vector_does_not_overflow_norm_validation(self):
+        values = np.full(1536, 1000.0, dtype=np.float16)
+        self.assertTrue(np.isfinite(values).all())
+        returned = require_nonzero_row_norms(values, "finite float16 vector")
+        self.assertIs(returned, values)
+
     def test_representation_shape_and_rows_are_validated(self):
         with self.assertRaisesRegex(ValueError, "must be 3D"):
             validate_representation_array(np.ones((2, 3)), 2, "mean_pool")

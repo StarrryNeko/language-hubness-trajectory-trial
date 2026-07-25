@@ -28,6 +28,12 @@ class ExtractionValidationTests(unittest.TestCase):
         self.assertEqual(cfg["dtype"], "float32")
         self.assertEqual(cfg["storage_dtype"], "float32")
 
+    def test_qwen_forces_float32_compute_and_storage(self):
+        root = Path(__file__).resolve().parents[1]
+        cfg = load_config(root / "configs" / "qwen25_1_5b_mvp.json")
+        self.assertEqual(cfg["dtype"], "float32")
+        self.assertEqual(cfg["storage_dtype"], "float32")
+
     def test_active_protocol_extracts_only_mean_pool_without_eos(self):
         root = Path(__file__).resolve().parents[1]
         cfg = load_config(root / "configs" / "qwen25_1_5b_mvp.json")

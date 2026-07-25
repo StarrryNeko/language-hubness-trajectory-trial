@@ -5,5 +5,7 @@
     "name_or_path": "Qwen/Qwen2.5-1.5B",
     "trust_remote_code": false
   },
+  "dtype": "float32",
+  "storage_dtype": "float32",
   "output_dir": "outputs/qwen25_1_5b_24lang"
 }

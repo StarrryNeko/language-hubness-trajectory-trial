@@ -15,7 +15,11 @@ def require_nonzero_row_norms(values, context, minimum=1e-12):
     array = require_finite(values, context)
     if array.ndim == 0:
         raise ValueError(f"{context}: expected at least one vector dimension")
-    norms = np.linalg.norm(array, axis=-1)
+    # NumPy may accumulate float16 squares in float16. A fully finite hidden
+    # vector can then produce an infinite norm even though none of its elements
+    # overflowed. Use float64 only for validation-time norm accumulation.
+    norm_values = np.asarray(array, dtype=np.float64)
+    norms = np.linalg.norm(norm_values, axis=-1)
     require_finite(norms, f"{context} norms")
     bad = np.argwhere(norms <= minimum)
     if len(bad):
