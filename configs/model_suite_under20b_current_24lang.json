@@ -1,0 +1,11 @@
+{
+  "configs": [
+    "euromoe_2_6b_a0_6b_2512_24lang.json",
+    "apertus_8b_2509_24lang.json",
+    "eurollm_9b_2512_24lang.json",
+    "qwen3_14b_base_24lang.json"
+  ],
+  "required_size_classes": ["S", "M", "L"],
+  "maximum_parameter_count_billions": 20,
+  "comparison_output_dir": "outputs/model_comparison_under20b_current_24lang"
+}

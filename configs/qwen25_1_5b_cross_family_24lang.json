@@ -1,0 +1,17 @@
+{
+  "extends": "base_cross_family_24lang.json",
+  "comparison_metadata_required": true,
+  "experiment_name": "qwen25_1_5b_cross_family_24lang",
+  "model": {
+    "name_or_path": "Qwen/Qwen2.5-1.5B",
+    "family": "Qwen",
+    "generation": "Qwen2.5",
+    "parameter_count_billions": 1.5,
+    "size_class": "S",
+    "training_stage": "pretraining",
+    "trust_remote_code": false
+  },
+  "dtype": "bfloat16",
+  "storage_dtype": "float32",
+  "output_dir": "outputs/qwen25_1_5b_cross_family_24lang"
+}

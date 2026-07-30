@@ -1,0 +1,18 @@
+{
+  "extends": "base_cross_family_24lang.json",
+  "comparison_metadata_required": true,
+  "experiment_name": "qwen3_14b_base_24lang",
+  "model": {
+    "name_or_path": "Qwen/Qwen3-14B-Base",
+    "family": "Qwen",
+    "generation": "Qwen3",
+    "parameter_count_billions": 14.8,
+    "size_class": "L",
+    "training_stage": "pretraining",
+    "trust_remote_code": false
+  },
+  "device": "auto",
+  "dtype": "bfloat16",
+  "storage_dtype": "float32",
+  "output_dir": "outputs/qwen3_14b_base_24lang"
+}

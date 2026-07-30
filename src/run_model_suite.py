@@ -6,7 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import configured_representations, load_config, representation_file_map
+from common import (
+    MODEL_SIZE_CLASSES,
+    configured_representations,
+    load_config,
+    model_metadata,
+    representation_file_map,
+)
 from evidence_rules import validate_model_status_payload
 
 
@@ -110,8 +116,43 @@ def main():
     configs = [suite_path.parent / item for item in suite["configs"]]
     if len(configs) < 2:
         raise ValueError("A model comparison suite requires at least two configs")
+    resolved_configs = [load_config(path) for path in configs]
+    resolved_metadata = [
+        model_metadata(
+            cfg, require=bool(cfg.get("comparison_metadata_required", False))
+        )
+        for cfg in resolved_configs
+    ]
+    maximum_parameters = suite.get("maximum_parameter_count_billions")
+    if maximum_parameters is not None:
+        maximum_parameters = float(maximum_parameters)
+        oversized = [
+            (
+                cfg.get("model", {}).get("name_or_path", cfg.get("model_name_or_path")),
+                metadata["parameter_count_billions"],
+            )
+            for cfg, metadata in zip(resolved_configs, resolved_metadata)
+            if metadata["parameter_count_billions"] is not None
+            and metadata["parameter_count_billions"] >= maximum_parameters
+        ]
+        if oversized:
+            raise ValueError(
+                f"Suite requires models below {maximum_parameters:g}B; "
+                f"oversized models: {oversized}"
+            )
+    required_size_classes = suite.get("required_size_classes", [])
+    if required_size_classes:
+        unknown = set(required_size_classes) - set(MODEL_SIZE_CLASSES)
+        if unknown:
+            raise ValueError(f"Unknown required size classes: {sorted(unknown)}")
+        configured_size_classes = {
+            model_metadata(cfg, require=True)["size_class"] for cfg in resolved_configs
+        }
+        missing = set(required_size_classes) - configured_size_classes
+        if missing:
+            raise ValueError(f"Suite is missing required size classes: {sorted(missing)}")
     pilot = Path(__file__).resolve().parent / "run_pilot.py"
-    first_cfg = load_config(configs[0])
+    first_cfg = resolved_configs[0]
     first_command = [sys.executable, str(pilot), "--config", str(configs[0])]
     append_reuse_flags(first_command, first_cfg, allow_skip_prepare=True)
     if args.skip_k_sweep:
@@ -120,8 +161,7 @@ def main():
         subprocess.run(first_command, check=True)
     else:
         print(f"Resume: verified and skipped {first_cfg['experiment_name']}")
-    for config_path in configs[1:]:
-        cfg = load_config(config_path)
+    for config_path, cfg in zip(configs[1:], resolved_configs[1:]):
         reuse_data(first_cfg["output_dir"], cfg["output_dir"])
         if args.resume and completed_for_config(cfg):
             print(f"Resume: verified and skipped {cfg['experiment_name']}")

@@ -68,7 +68,15 @@ class CompareModelTests(unittest.TestCase):
         }), encoding="utf-8")
         config = {
             "experiment_name": f"experiment_{number}",
-            "model": {"name_or_path": f"model/{number}"},
+            "comparison_metadata_required": True,
+            "model": {
+                "name_or_path": f"model/{number}",
+                "family": "synthetic",
+                "generation": "v2",
+                "parameter_count_billions": {1: 4.0, 2: 9.0, 3: 14.8}[number],
+                "size_class": {1: "S", 2: "M", 3: "L"}[number],
+                "training_stage": "pretraining",
+            },
             "output_dir": str(output),
             "metrics": {"primary_representation": "mean_pool"},
         }
@@ -157,6 +165,52 @@ class CompareModelTests(unittest.TestCase):
             verdict = compare_suite(suite)
             self.assertEqual([row["status"] for row in verdict["model_statuses"]], ["INVALID", "INVALID"])
             self.assertEqual(verdict["valid_model_count"], 0)
+
+    def test_complete_sml_ladder_is_reported_separately(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            configs = [
+                self.write_model(root, 1),
+                self.write_model(root, 2),
+                self.write_model(root, 3),
+            ]
+            suite = root / "suite.json"
+            suite.write_text(json.dumps({
+                "configs": configs,
+                "comparison_output_dir": str(root / "comparison"),
+            }), encoding="utf-8")
+            verdict = compare_suite(suite)
+            self.assertEqual(verdict["size_ladder_status"], "COMPLETE")
+            self.assertEqual(verdict["primary_across_sizes_status"], "SUPPORTED")
+            self.assertEqual(verdict["robust_across_sizes_status"], "SUPPORTED")
+            self.assertEqual(
+                verdict["generation_statuses"]["v2"]["robust_models"],
+                ["model/1", "model/2", "model/3"],
+            )
+            self.assertEqual(
+                verdict["family_statuses"]["synthetic"]["robust_models"],
+                ["model/1", "model/2", "model/3"],
+            )
+            summary = pd.read_csv(root / "comparison" / "model_comparison_summary.csv")
+            self.assertEqual(set(summary.size_class), {"S", "M", "L"})
+
+    def test_declared_size_class_must_match_parameter_count(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            invalid_config = self.write_model(root, 1)
+            config_path = root / invalid_config
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["model"]["size_class"] = "L"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            valid_config = self.write_model(root, 2)
+            suite = root / "suite.json"
+            suite.write_text(json.dumps({
+                "configs": [invalid_config, valid_config],
+                "comparison_output_dir": str(root / "comparison"),
+            }), encoding="utf-8")
+            verdict = compare_suite(suite)
+            self.assertEqual(verdict["model_statuses"][0]["status"], "INVALID")
+            self.assertIn("does not match", verdict["model_statuses"][0]["reason"])
 
 
 if __name__ == "__main__":

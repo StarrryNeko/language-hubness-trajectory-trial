@@ -18,6 +18,7 @@ from common import (
     configured_representations,
     ensure_dirs,
     load_config,
+    model_metadata,
     read_jsonl,
     representation_file_map,
     set_seed,
@@ -253,6 +254,9 @@ def main():
     manifest = {
         "protocol_version": "mean_pool_no_eos_v1",
         "model": settings["name"],
+        "model_metadata": model_metadata(
+            cfg, require=bool(cfg.get("comparison_metadata_required", False))
+        ),
         "tokenizer": settings["tokenizer"],
         "huggingface_cache_dir": settings["cache_dir"],
         "rows": len(meta_rows),

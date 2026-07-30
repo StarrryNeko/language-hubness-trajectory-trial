@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from common import load_config
+from common import MODEL_SIZE_CLASSES, load_config, model_metadata
 from evidence_rules import (
     REQUIRED_EVIDENCE_METRICS,
     max_consecutive_layers,
@@ -72,6 +72,7 @@ def classify_cross_model(validation):
 
 def load_model_result(config_path):
     cfg = load_config(config_path)
+    metadata = model_metadata(cfg, require=bool(cfg.get("comparison_metadata_required", False)))
     model_name = cfg.get("model", {}).get("name_or_path", cfg.get("model_name_or_path"))
     experiment = cfg["experiment_name"]
     output = Path(cfg["output_dir"])
@@ -109,11 +110,14 @@ def load_model_result(config_path):
     frame = frame[frame.metric.isin(REQUIRED_EVIDENCE_METRICS)].copy()
     frame["model"] = model_name
     frame["experiment_name"] = experiment
+    for key, value in metadata.items():
+        frame[key] = value
     maximum = max(1, expected_layers[-1])
     frame["normalized_layer"] = frame.layer.astype(int) / maximum
     return frame, {
         "model": model_name,
         "experiment_name": experiment,
+        **metadata,
         **cross_model_evidence,
         "reason": None,
     }
@@ -137,11 +141,14 @@ def compare_suite(suite_path):
                 cfg = load_config(config_path)
                 model = cfg.get("model", {}).get("name_or_path", cfg.get("model_name_or_path"))
                 experiment = cfg.get("experiment_name", config_path.stem)
+                metadata = model_metadata(cfg, require=False)
             except (OSError, ValueError, json.JSONDecodeError):
                 model, experiment = config_path.stem, config_path.stem
+                metadata = {}
             model_statuses.append({
                 "model": model,
                 "experiment_name": experiment,
+                **metadata,
                 "status": "INVALID",
                 "reason": str(error),
             })
@@ -149,19 +156,38 @@ def compare_suite(suite_path):
     trajectory_columns = [
         "representation", "similarity_method", "layer", "metric", "mean", "ci_lower",
         "ci_upper", "model", "experiment_name", "normalized_layer",
+        "model_family", "model_generation", "parameter_count_billions",
+        "size_class", "training_stage", "architecture_type",
+        "active_parameter_count_billions",
     ]
     combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=trajectory_columns)
     combined.to_csv(output / "model_english_hubness_trajectories.csv", index=False)
 
     summary_rows = []
     integrate = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
-    for (model, experiment, metric), group in combined.groupby(["model", "experiment_name", "metric"]):
+    group_keys = [
+        "model", "experiment_name", "model_family", "model_generation",
+        "parameter_count_billions", "size_class", "training_stage",
+        "architecture_type", "active_parameter_count_billions", "metric",
+    ]
+    for keys, group in combined.groupby(group_keys, dropna=False):
+        (
+            model, experiment, family, generation, parameter_count, size_class,
+            training_stage, architecture_type, active_parameter_count, metric,
+        ) = keys
         group = group.sort_values("normalized_layer")
         peak = group.loc[group["mean"].idxmax()]
         positive_layers = group.loc[group.ci_lower > 0, "layer"].astype(int).tolist()
         summary_rows.append({
             "model": model,
             "experiment_name": experiment,
+            "model_family": family,
+            "model_generation": generation,
+            "parameter_count_billions": parameter_count,
+            "size_class": size_class,
+            "training_stage": training_stage,
+            "architecture_type": architecture_type,
+            "active_parameter_count_billions": active_parameter_count,
             "metric": metric,
             "trajectory_auc": float(integrate(group["mean"], group.normalized_layer)),
             "positive_ci_layer_fraction": float((group.ci_lower > 0).mean()),
@@ -170,7 +196,9 @@ def compare_suite(suite_path):
             "peak_normalized_layer": float(peak.normalized_layer),
         })
     summary = pd.DataFrame(summary_rows, columns=[
-        "model", "experiment_name", "metric", "trajectory_auc",
+        "model", "experiment_name", "model_family", "model_generation",
+        "parameter_count_billions", "size_class", "training_stage",
+        "architecture_type", "active_parameter_count_billions", "metric", "trajectory_auc",
         "positive_ci_layer_fraction", "positive_ci_longest_run", "peak_value",
         "peak_normalized_layer",
     ])
@@ -201,7 +229,82 @@ def compare_suite(suite_path):
     conditional_models = sorted({
         row["model"] for row in model_statuses if row["status"] == "DENSITY_SENSITIVE"
     })
+    size_class_statuses = {}
+    for size_class in MODEL_SIZE_CLASSES:
+        rows = [
+            row for row in model_statuses
+            if row.get("size_class") == size_class
+            and row.get("status") in VALID_CROSS_MODEL_STATUSES
+        ]
+        size_class_statuses[size_class] = {
+            "valid_models": [row["model"] for row in rows],
+            "primary_supported_models": [
+                row["model"] for row in rows if row.get("primary_supported") is True
+            ],
+            "robust_models": [
+                row["model"] for row in rows if row.get("status") == "ROBUST"
+            ],
+        }
+    complete_size_ladder = all(
+        size_class_statuses[size_class]["valid_models"] for size_class in MODEL_SIZE_CLASSES
+    )
+    primary_any_model_each_size = complete_size_ladder and all(
+        size_class_statuses[size_class]["primary_supported_models"]
+        for size_class in MODEL_SIZE_CLASSES
+    )
+    robust_any_model_each_size = complete_size_ladder and all(
+        size_class_statuses[size_class]["robust_models"] for size_class in MODEL_SIZE_CLASSES
+    )
+    valid_size_rows = {
+        size_class: [
+            row for row in model_statuses
+            if row.get("size_class") == size_class
+            and row.get("status") in VALID_CROSS_MODEL_STATUSES
+        ]
+        for size_class in MODEL_SIZE_CLASSES
+    }
+    primary_across_sizes = complete_size_ladder and all(
+        all(row.get("primary_supported") is True for row in valid_size_rows[size_class])
+        for size_class in MODEL_SIZE_CLASSES
+    )
+    robust_across_sizes = complete_size_ladder and all(
+        all(row.get("status") == "ROBUST" for row in valid_size_rows[size_class])
+        for size_class in MODEL_SIZE_CLASSES
+    )
+    def grouped_statuses(field):
+        groups = {}
+        labels = sorted({
+            row.get(field) for row in model_statuses if row.get(field) is not None
+        })
+        for label in labels:
+            rows = [
+                row for row in model_statuses
+                if row.get(field) == label
+                and row.get("status") in VALID_CROSS_MODEL_STATUSES
+            ]
+            groups[label] = {
+                "valid_models": [row["model"] for row in rows],
+                "primary_supported_models": [
+                    row["model"] for row in rows if row.get("primary_supported") is True
+                ],
+                "robust_models": [
+                    row["model"] for row in rows if row.get("status") == "ROBUST"
+                ],
+                "density_sensitive_models": [
+                    row["model"] for row in rows if row.get("status") == "DENSITY_SENSITIVE"
+                ],
+            }
+        return groups
+
+    generation_statuses = grouped_statuses("model_generation")
+    family_statuses = grouped_statuses("model_family")
     verdict = {
+        "suite_scope": {
+            "maximum_parameter_count_billions": suite.get(
+                "maximum_parameter_count_billions"
+            ),
+            "required_size_classes": suite.get("required_size_classes", []),
+        },
         "models_compared": [row["model"] for row in model_statuses],
         "model_statuses": model_statuses,
         "valid_model_count": sum(
@@ -213,6 +316,29 @@ def compare_suite(suite_path):
         ),
         "robust_models": robust_models,
         "conditional_models": conditional_models,
+        "size_class_definition": {
+            "basis": "total_parameter_count_billions",
+            "S": "[0, 7)",
+            "M": "[7, 12)",
+            "L": "[12, 20)",
+            "mainline_scope": "<20B decoder-only base models; MoE binned by total parameters",
+        },
+        "size_class_statuses": size_class_statuses,
+        "size_ladder_status": "COMPLETE" if complete_size_ladder else "INCOMPLETE",
+        "primary_any_model_each_size_status": (
+            "SUPPORTED" if primary_any_model_each_size else "NOT_SUPPORTED"
+        ),
+        "robust_any_model_each_size_status": (
+            "SUPPORTED" if robust_any_model_each_size else "NOT_SUPPORTED"
+        ),
+        "primary_across_sizes_status": (
+            "SUPPORTED" if primary_across_sizes else "NOT_SUPPORTED"
+        ),
+        "robust_across_sizes_status": (
+            "SUPPORTED" if robust_across_sizes else "NOT_SUPPORTED"
+        ),
+        "generation_statuses": generation_statuses,
+        "family_statuses": family_statuses,
         "replication_status": "REPLICATED" if len(robust_models) >= 2 else "NOT_REPLICATED",
         "evaluation_policy": {
             "representation_protocol": "mean_pool_only_without_appended_eos",

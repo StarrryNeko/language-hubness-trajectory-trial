@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from common import load_config
+from common import load_config, model_metadata
 
 
 def run_step(label, script, config, extra_args=None):
@@ -107,6 +107,9 @@ def main():
         "config_sha256": hashlib.sha256(config_text.encode("utf-8")).hexdigest(),
         "experiment_name": cfg.get("experiment_name"),
         "model": cfg.get("model", {}).get("name_or_path", cfg.get("model_name_or_path")),
+        "model_metadata": model_metadata(
+            cfg, require=bool(cfg.get("comparison_metadata_required", False))
+        ),
         "dataset": cfg.get("dataset"),
         "metrics": cfg.get("metrics"),
         "representation_controls": cfg.get("representation_controls"),

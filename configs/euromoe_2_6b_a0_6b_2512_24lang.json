@@ -1,0 +1,20 @@
+{
+  "extends": "base_cross_family_24lang.json",
+  "comparison_metadata_required": true,
+  "experiment_name": "euromoe_2_6b_a0_6b_2512_24lang",
+  "model": {
+    "name_or_path": "utter-project/EuroMoE-2.6B-A0.6B-2512",
+    "family": "EuroMoE",
+    "generation": "EuroMoE-2512",
+    "parameter_count_billions": 2.6,
+    "active_parameter_count_billions": 0.6,
+    "architecture_type": "moe",
+    "size_class": "S",
+    "training_stage": "pretraining",
+    "trust_remote_code": false
+  },
+  "device": "auto",
+  "dtype": "bfloat16",
+  "storage_dtype": "float32",
+  "output_dir": "outputs/euromoe_2_6b_a0_6b_2512_24lang"
+}

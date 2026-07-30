@@ -6,6 +6,73 @@ from pathlib import Path
 import numpy as np
 
 
+MODEL_SIZE_CLASSES = ("S", "M", "L")
+
+
+def classify_model_size(parameter_count_billions):
+    """Classify dense models by total parameter count, not checkpoint bytes."""
+    count = float(parameter_count_billions)
+    if not np.isfinite(count) or count <= 0:
+        raise ValueError("model.parameter_count_billions must be a positive finite number")
+    if count < 7:
+        return "S"
+    if count < 12:
+        return "M"
+    if count < 20:
+        return "L"
+    raise ValueError(
+        "Mainline model size must be below 20B parameters; "
+        f"got {count:g}B"
+    )
+
+
+def model_metadata(cfg, require=False):
+    """Return audited model metadata used for generation and scale comparisons."""
+    model = cfg.get("model", {})
+    required_fields = {
+        "model_family": model.get("family"),
+        "model_generation": model.get("generation"),
+        "parameter_count_billions": model.get("parameter_count_billions"),
+        "size_class": model.get("size_class"),
+        "training_stage": model.get("training_stage"),
+    }
+    if not require and all(value is None for value in required_fields.values()):
+        return {
+            **required_fields,
+            "architecture_type": None,
+            "active_parameter_count_billions": None,
+        }
+    missing = [key for key, value in required_fields.items() if value is None]
+    if missing:
+        raise ValueError(f"model metadata is missing fields: {missing}")
+    expected = classify_model_size(required_fields["parameter_count_billions"])
+    declared = str(required_fields["size_class"]).upper()
+    if declared not in MODEL_SIZE_CLASSES:
+        raise ValueError(f"model.size_class must be one of {MODEL_SIZE_CLASSES}")
+    if declared != expected:
+        raise ValueError(
+            "model.size_class does not match parameter_count_billions: "
+            f"declared={declared}, expected={expected}"
+        )
+    total = float(required_fields["parameter_count_billions"])
+    architecture_type = str(model.get("architecture_type", "dense")).lower()
+    if architecture_type not in {"dense", "moe"}:
+        raise ValueError("model.architecture_type must be 'dense' or 'moe'")
+    active = float(model.get("active_parameter_count_billions", total))
+    if not np.isfinite(active) or active <= 0 or active > total:
+        raise ValueError(
+            "model.active_parameter_count_billions must be positive and no larger "
+            "than parameter_count_billions"
+        )
+    return {
+        **required_fields,
+        "parameter_count_billions": total,
+        "size_class": declared,
+        "architecture_type": architecture_type,
+        "active_parameter_count_billions": active,
+    }
+
+
 def load_config(path):
     path = Path(path)
     with path.open("r", encoding="utf-8") as f:
@@ -17,6 +84,11 @@ def load_config(path):
     base = load_config(path.parent / parent)
 
     def merge(left, right):
+        if isinstance(right, dict) and right.get("__replace__") is True:
+            return {
+                key: value for key, value in right.items()
+                if key != "__replace__"
+            }
         result = dict(left)
         for key, value in right.items():
             if isinstance(value, dict) and isinstance(result.get(key), dict):

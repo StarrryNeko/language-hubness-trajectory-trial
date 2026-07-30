@@ -7,15 +7,44 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from common import configured_representations, load_config, validate_language_inventory
+from common import (
+    classify_model_size,
+    configured_representations,
+    load_config,
+    validate_language_inventory,
+)
 from compute_metrics import bootstrap_mean_ci, group_statistics, locally_scaled_similarity, rank_percentiles
 
 
 class SameSemanticMetricTests(unittest.TestCase):
+    def test_under20b_size_boundaries(self):
+        self.assertEqual(classify_model_size(4.0), "S")
+        self.assertEqual(classify_model_size(8.0), "M")
+        self.assertEqual(classify_model_size(14.8), "L")
+        with self.assertRaisesRegex(ValueError, "below 20B"):
+            classify_model_size(20.0)
+
     def test_official_config_has_only_two_representations_and_24_languages(self):
         cfg = load_config(Path(__file__).resolve().parents[1] / "configs" / "qwen25_1_5b_mvp.json")
         self.assertEqual(configured_representations(cfg), ["mean_pool"])
         self.assertEqual(len(validate_language_inventory(cfg)), 24)
+
+    def test_cross_family_config_replaces_language_inventory(self):
+        cfg = load_config(
+            Path(__file__).resolve().parents[1]
+            / "configs"
+            / "eurollm_9b_2512_24lang.json"
+        )
+        languages = validate_language_inventory(cfg)
+        self.assertEqual(len(languages), 24)
+        self.assertEqual(
+            set(languages),
+            {
+                "en", "zh", "de", "ar", "hi", "es", "fr", "ru", "ja", "ko",
+                "tr", "fi", "el", "bg", "it", "pt", "cs", "nl", "pl", "ro",
+                "uk", "sv", "da", "hu",
+            },
+        )
 
     def test_group_knn_conserves_total_occurrence(self):
         rng = np.random.default_rng(3)
