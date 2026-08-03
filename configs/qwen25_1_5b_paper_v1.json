@@ -1,0 +1,15 @@
+{
+  "extends": "qwen25_1_5b_mvp.json",
+  "experiment_name": "qwen25_1_5b_paper_v1_random200",
+  "output_dir": "outputs_paper_v1/qwen25_1_5b_random200",
+  "dataset": {
+    "sample_size_per_language": 200,
+    "sample_selection": {
+      "strategy": "random_without_replacement",
+      "seed": 20260801
+    }
+  },
+  "paper_v1": {
+    "sample_robustness_size": 100
+  }
+}

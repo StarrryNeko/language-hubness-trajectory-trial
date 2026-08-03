@@ -1,0 +1,17 @@
+{
+  "extends": "base_week1_random200.json",
+  "experiment_name": "moonlight_16b_a3b_week1_random200",
+  "model": {
+    "name_or_path": "moonshotai/Moonlight-16B-A3B",
+    "family": "Moonshot",
+    "generation": "Moonlight",
+    "parameter_count_billions": 15.29,
+    "active_parameter_count_billions": 2.24,
+    "size_class": "L",
+    "training_stage": "pretraining",
+    "architecture_type": "moe",
+    "trust_remote_code": true,
+    "attn_implementation": "eager"
+  },
+  "output_dir": "outputs_week1/moonlight_16b_a3b_random200"
+}

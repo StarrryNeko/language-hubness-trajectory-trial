@@ -1,0 +1,15 @@
+{
+  "extends": "bloom_1b7_24lang.json",
+  "experiment_name": "bloom_1b7_paper_v1_random200",
+  "output_dir": "outputs_paper_v1/bloom_1b7_random200",
+  "dataset": {
+    "sample_size_per_language": 200,
+    "sample_selection": {
+      "strategy": "random_without_replacement",
+      "seed": 20260801
+    }
+  },
+  "paper_v1": {
+    "sample_robustness_size": 100
+  }
+}

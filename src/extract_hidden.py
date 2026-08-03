@@ -21,6 +21,7 @@ from common import (
     model_metadata,
     read_jsonl,
     representation_file_map,
+    resolve_model_source,
     set_seed,
     validate_language_inventory,
     write_jsonl,
@@ -51,13 +52,43 @@ def decoded_token(tokenizer, token_id):
 
 def model_settings(cfg):
     model_cfg = cfg.get("model", {})
-    name = model_cfg.get("name_or_path", cfg.get("model_name_or_path"))
-    if not name:
+    model_id = model_cfg.get("name_or_path", cfg.get("model_name_or_path"))
+    if not model_id:
         raise ValueError("Set model.name_or_path (or legacy model_name_or_path)")
+    canonical, source, local_files_only = resolve_model_source(
+        model_id,
+        explicit_local_path=model_cfg.get("local_path"),
+        model_root=model_cfg.get("model_root"),
+    )
+    tokenizer_id = model_cfg.get("tokenizer_name_or_path", canonical)
+    if tokenizer_id == canonical:
+        tokenizer_source = source
+    else:
+        _, tokenizer_source, tokenizer_is_local = resolve_model_source(
+            tokenizer_id,
+            explicit_local_path=model_cfg.get("tokenizer_local_path"),
+            model_root=model_cfg.get("model_root"),
+        )
+        local_files_only = local_files_only and tokenizer_is_local
+    resolved_revision = model_cfg.get("revision")
+    if local_files_only:
+        portable_manifest = Path(source) / ".lht_model_manifest.json"
+        if portable_manifest.exists():
+            payload = json.loads(portable_manifest.read_text(encoding="utf-8"))
+            if payload.get("model_id") != canonical:
+                raise ValueError(
+                    f"Portable model identity mismatch in {portable_manifest}: "
+                    f"expected {canonical}, got {payload.get('model_id')}"
+                )
+            resolved_revision = payload.get("resolved_revision", resolved_revision)
     return {
-        "name": name,
-        "tokenizer": model_cfg.get("tokenizer_name_or_path", name),
+        "model_id": canonical,
+        "name": source,
+        "tokenizer_id": tokenizer_id,
+        "tokenizer": tokenizer_source,
+        "local_files_only": local_files_only,
         "revision": model_cfg.get("revision"),
+        "resolved_revision": resolved_revision,
         "trust_remote_code": bool(model_cfg.get("trust_remote_code", False)),
         "attn_implementation": model_cfg.get("attn_implementation"),
         "cache_dir": model_cfg.get("cache_dir", cfg.get("huggingface_cache_dir")),
@@ -105,10 +136,13 @@ def main():
     if max_length < 1:
         raise ValueError("max_length must leave room for sentence text")
 
-    tokenizer_kwargs = {"trust_remote_code": settings["trust_remote_code"]}
+    tokenizer_kwargs = {
+        "trust_remote_code": settings["trust_remote_code"],
+        "local_files_only": settings["local_files_only"],
+    }
     if settings["cache_dir"]:
         tokenizer_kwargs["cache_dir"] = settings["cache_dir"]
-    if settings["revision"]:
+    if settings["revision"] and not settings["local_files_only"]:
         tokenizer_kwargs["revision"] = settings["revision"]
     tokenizer = AutoTokenizer.from_pretrained(settings["tokenizer"], **tokenizer_kwargs)
     controls = cfg.get("representation_controls", {})
@@ -121,10 +155,12 @@ def main():
     load_kwargs = {
         "dtype": dtype,
         "trust_remote_code": settings["trust_remote_code"],
+        "local_files_only": settings["local_files_only"],
+        "low_cpu_mem_usage": True,
     }
     if settings["cache_dir"]:
         load_kwargs["cache_dir"] = settings["cache_dir"]
-    if settings["revision"]:
+    if settings["revision"] and not settings["local_files_only"]:
         load_kwargs["revision"] = settings["revision"]
     if settings["attn_implementation"]:
         load_kwargs["attn_implementation"] = settings["attn_implementation"]
@@ -182,7 +218,7 @@ def main():
             for layer, layer_hidden in enumerate(outputs.hidden_states):
                 hidden = layer_hidden[0].detach()
                 context_base = (
-                    f"model={settings['name']} row={row_idx} semantic_id={row['id']} "
+                    f"model={settings['model_id']} row={row_idx} semantic_id={row['id']} "
                     f"lang={row['lang']} layer={layer}"
                 )
                 if not bool(torch.isfinite(hidden).all().item()):
@@ -201,7 +237,7 @@ def main():
                 stored = np.stack(layer_vectors).astype(storage_dtype, copy=False)
                 for layer, stored_vector in enumerate(stored):
                     stored_context = (
-                        f"model={settings['name']} row={row_idx} semantic_id={row['id']} "
+                        f"model={settings['model_id']} row={row_idx} semantic_id={row['id']} "
                         f"lang={row['lang']} layer={layer} representation={name} after_storage"
                     )
                     require_finite(stored_vector, stored_context)
@@ -235,7 +271,7 @@ def main():
     for name, values in vectors.items():
         stacked[name] = np.stack(values)
         validate_representation_array(
-            stacked[name], len(meta_rows), f"model={settings['name']} representation={name}"
+            stacked[name], len(meta_rows), f"model={settings['model_id']} representation={name}"
         )
         np.save(Path(paths["hidden"]) / file_map[name], stacked[name])
     pd.DataFrame(meta_rows).to_csv(Path(paths["hidden"]) / "metadata.csv", index=False, encoding="utf-8")
@@ -253,11 +289,16 @@ def main():
     peak_gpu = torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
     manifest = {
         "protocol_version": "mean_pool_no_eos_v1",
-        "model": settings["name"],
+        "model": settings["model_id"],
+        "resolved_model_source": settings["name"],
+        "model_loaded_from_local_directory": settings["local_files_only"],
         "model_metadata": model_metadata(
             cfg, require=bool(cfg.get("comparison_metadata_required", False))
         ),
-        "tokenizer": settings["tokenizer"],
+        "tokenizer": settings["tokenizer_id"],
+        "resolved_tokenizer_source": settings["tokenizer"],
+        "revision": settings["revision"],
+        "resolved_revision": settings["resolved_revision"],
         "huggingface_cache_dir": settings["cache_dir"],
         "rows": len(meta_rows),
         "semantic_groups": len({row["id"] for row in meta_rows}),
@@ -278,6 +319,14 @@ def main():
         "peak_allocated_gpu_gib": peak_gpu,
         "torch_version": torch.__version__,
     }
+    dataset_manifest_path = Path(paths["data"]) / "dataset_manifest.json"
+    if dataset_manifest_path.exists():
+        dataset_manifest = json.loads(dataset_manifest_path.read_text(encoding="utf-8"))
+        manifest["data_content_sha256"] = dataset_manifest.get("data_content_sha256")
+        manifest["sample_selection_strategy"] = dataset_manifest.get("sample_selection_strategy")
+        manifest["selected_semantic_indices_sha256"] = dataset_manifest.get(
+            "selected_semantic_indices_sha256"
+        )
     (Path(paths["output"]) / "extraction_manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
     )

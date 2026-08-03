@@ -1,0 +1,16 @@
+{
+  "configs": [
+    "qwen25_1_5b_week1.json",
+    "bloom_1b7_week1.json",
+    "xglm_1b7_week1.json",
+    "llama32_3b_week1.json",
+    "llama31_8b_week1.json",
+    "moonlight_16b_a3b_week1.json"
+  ],
+  "comparison_output_dir": "outputs_week1/model_comparison_with_moonlight_random200",
+  "sample_selection_strategy": "random_without_replacement",
+  "sample_selection_seed": 20260801,
+  "sample_size_per_language": 200,
+  "model_list_frozen_before_results": true,
+  "conditional_model_policy": "Moonlight is included only after the two-hour hidden-state audit passes."
+}

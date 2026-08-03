@@ -12,6 +12,7 @@ from common import (
     load_config,
     model_metadata,
     representation_file_map,
+    resolve_model_source,
 )
 from evidence_rules import validate_model_status_payload
 
@@ -64,7 +65,32 @@ def completed_for_config(cfg):
 def prepared_data_reusable(cfg):
     output = Path(cfg["output_dir"])
     data = output / "data"
-    return all((data / name).exists() for name in ("parallel_samples.jsonl", "dataset_manifest.json"))
+    sample_path = data / "parallel_samples.jsonl"
+    manifest_path = data / "dataset_manifest.json"
+    if not sample_path.exists() or not manifest_path.exists():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    dataset = cfg.get("dataset", {})
+    languages = dataset.get("languages")
+    expected_strategy = dataset.get("sample_selection", {}).get("strategy")
+    expected_seed = dataset.get("sample_selection", {}).get("seed")
+    expected_size = dataset.get("sample_size_per_language")
+    if languages is not None and set(manifest.get("languages", [])) != set(languages):
+        return False
+    if expected_size is not None and int(manifest.get("semantic_groups", -1)) != int(expected_size):
+        return False
+    actual_strategy = manifest.get("sample_selection_strategy")
+    if expected_strategy == "random_without_replacement":
+        if actual_strategy != expected_strategy or manifest.get("selected_semantic_indices_sha256") is None:
+            return False
+        if int(manifest.get("sample_selection_seed", -1)) != int(expected_seed):
+            return False
+    elif expected_strategy is not None and actual_strategy not in {None, expected_strategy}:
+        return False
+    return True
 
 
 def extraction_reusable(cfg):
@@ -85,6 +111,42 @@ def extraction_reusable(cfg):
         return False
     expected_storage = cfg.get("storage_dtype", "float16")
     expected_model = cfg.get("model", {}).get("name_or_path", cfg.get("model_name_or_path"))
+    model_cfg = cfg.get("model", {})
+    expected_revision = model_cfg.get("revision")
+    revision_matches = True
+    try:
+        _, resolved_source, is_local = resolve_model_source(
+            expected_model,
+            explicit_local_path=model_cfg.get("local_path"),
+            model_root=model_cfg.get("model_root"),
+        )
+        if is_local:
+            portable_manifest = Path(resolved_source) / ".lht_model_manifest.json"
+            if portable_manifest.exists() and manifest.get("resolved_revision") is not None:
+                portable_payload = json.loads(portable_manifest.read_text(encoding="utf-8"))
+                revision_matches = (
+                    manifest.get("resolved_revision") == portable_payload.get("resolved_revision")
+                )
+        elif expected_revision is not None:
+            revision_matches = manifest.get("revision") == expected_revision
+    except (OSError, ValueError, json.JSONDecodeError):
+        revision_matches = False
+    data_manifest_path = output / "data" / "dataset_manifest.json"
+    data_hash_matches = True
+    expected_strategy = cfg.get("dataset", {}).get("sample_selection", {}).get("strategy")
+    if data_manifest_path.exists():
+        try:
+            data_manifest = json.loads(data_manifest_path.read_text(encoding="utf-8"))
+            data_hash = data_manifest.get("data_content_sha256")
+            extraction_hash = manifest.get("data_content_sha256")
+            if data_hash is not None and extraction_hash is not None:
+                data_hash_matches = data_hash == extraction_hash
+            elif expected_strategy == "random_without_replacement":
+                data_hash_matches = False
+        except (OSError, json.JSONDecodeError):
+            data_hash_matches = False
+    elif expected_strategy == "random_without_replacement":
+        data_hash_matches = False
     return (
         manifest.get("protocol_version") == "mean_pool_no_eos_v1"
         and manifest.get("model") == expected_model
@@ -92,6 +154,8 @@ def extraction_reusable(cfg):
         and manifest_representations == set(configured_representations(cfg))
         and manifest.get("appended_eos") is False
         and truncated_inputs == 0
+        and data_hash_matches
+        and revision_matches
     )
 
 

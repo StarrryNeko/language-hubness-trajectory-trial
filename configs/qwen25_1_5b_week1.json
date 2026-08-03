@@ -1,0 +1,15 @@
+{
+  "extends": "base_week1_random200.json",
+  "experiment_name": "qwen25_1_5b_week1_random200",
+  "model": {
+    "name_or_path": "Qwen/Qwen2.5-1.5B",
+    "family": "Qwen",
+    "generation": "Qwen2.5",
+    "parameter_count_billions": 1.54,
+    "size_class": "S",
+    "training_stage": "pretraining",
+    "architecture_type": "dense",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs_week1/qwen25_1_5b_random200"
+}

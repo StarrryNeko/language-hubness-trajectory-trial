@@ -12,6 +12,10 @@
     "use_auth_token": true,
     "split": "dev",
     "sample_size_per_language": 100,
+    "sample_selection": {
+      "strategy": "first_n",
+      "seed": 42
+    },
     "minimum_languages_per_semantic_group": 20,
     "languages": {
       "en": "eng_Latn",
@@ -93,6 +97,25 @@
   "robustness": {
     "run_k_sweep_in_full_pipeline": true,
     "k_values": [1, 3, 5, 10]
+  },
+  "paper_v1": {
+    "enabled": true,
+    "result_directory": "paper_v1",
+    "seed": 20260801,
+    "bootstrap_samples": 500,
+    "confidence_level": 0.95,
+    "shuffled_permutations": 20,
+    "label_permutations": 500,
+    "primary_permutation_metric": "k_occurrence_excess",
+    "probe_split_ratios": [0.6, 0.2, 0.2],
+    "probe_c_values": [0.1, 1.0, 10.0],
+    "probe_permutations": 20,
+    "geometry_fit_fraction": 0.5,
+    "geometry_remove_pcs": [1, 3, 5],
+    "language_structure_k": 10,
+    "sample_robustness_subsets": 10,
+    "sample_robustness_size": 80,
+    "run_in_full_pipeline": false
   },
   "token_export": {"enabled": false}
 }

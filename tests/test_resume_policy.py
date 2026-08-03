@@ -6,10 +6,36 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from run_model_suite import extraction_reusable
+from run_model_suite import extraction_reusable, prepared_data_reusable
 
 
 class ResumePolicyTests(unittest.TestCase):
+    def test_random_sample_data_requires_matching_strategy_seed_and_size(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            data = root / "data"
+            data.mkdir()
+            (data / "parallel_samples.jsonl").write_text("{}\n", encoding="utf-8")
+            manifest = {
+                "languages": ["en", "zh"],
+                "semantic_groups": 200,
+                "sample_selection_strategy": "random_without_replacement",
+                "sample_selection_seed": 17,
+                "selected_semantic_indices_sha256": "abc",
+            }
+            (data / "dataset_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            cfg = {
+                "output_dir": str(root),
+                "dataset": {
+                    "languages": {"en": "eng", "zh": "zho"},
+                    "sample_size_per_language": 200,
+                    "sample_selection": {"strategy": "random_without_replacement", "seed": 17},
+                },
+            }
+            self.assertTrue(prepared_data_reusable(cfg))
+            cfg["dataset"]["sample_selection"]["seed"] = 18
+            self.assertFalse(prepared_data_reusable(cfg))
+
     def make_config(self, root, storage_dtype):
         return {
             "output_dir": str(root),

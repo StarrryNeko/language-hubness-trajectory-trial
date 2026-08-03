@@ -1,2 +1,6 @@
 # Generated experiment outputs (model vectors, metrics, figures, validations)
 /outputs/
+
+# Local model-download environment and offline model weights
+/.venv-model-download/
+/langhub_models/

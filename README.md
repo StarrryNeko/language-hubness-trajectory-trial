@@ -1,5 +1,25 @@
 # Language Hubness Trajectory
 
+## 一周冲刺正式入口（2026-08）
+
+五个必跑模型：
+
+```bash
+python src/run_formal_suite.py \
+  --suite configs/model_suite_week1_required_random200.json \
+  --resume
+```
+
+Moonlight通过hidden-state审计后：
+
+```bash
+python src/run_formal_suite.py \
+  --suite configs/model_suite_week1_with_moonlight_random200.json \
+  --resume
+```
+
+新增离线模块包括竞争性余弦（hard margin、pairwise win rate、英语排名、完整source→candidate矩阵）以及范数、leave-one-out语义质心、全局质心、PC1、局部密度和相邻层轨迹。完整的离线权重下载、上传、Blackwell/H800审计和运行顺序见`docs/服务器执行指南_week1.md`。
+
 本项目研究多语言因果语言模型中，英语是否在层间表示空间里成为 hub。当前正式协议只使用：
 
 - `mean_pool`：对原句 tokenizer 文本 token 的 hidden state 求均值；可选 BOS 不进入均值，输入末尾不追加 EOS。
@@ -61,6 +81,43 @@ python src/inspect_hidden_states.py \
 
 ```bash
 python src/run_model_suite.py --suite configs/model_suite_24lang.json
+```
+
+## paper_v1 离线正式分析
+
+模型已经完成 `mean_pool_no_eos_v1` hidden-state 提取时，不要重新加载模型权重。直接运行：
+
+```bash
+python src/run_paper_analysis.py \
+  --config configs/qwen25_1_5b_mvp.json \
+  --resume
+```
+
+该入口只读取 `output_dir/hidden/metadata.csv` 与
+`output_dir/hidden/sentence_layer_mean_pool.npy`，并把确认性结果写入
+`output_dir/paper_v1/`。它依次计算 AlignmentGain、24 语言目标轮换、
+max-statistic 标签置换、raw/local-scaled breadth、交叉拟合公共方向控制、
+随机语义子集、language structure 和 semantic-ID split language probe。
+
+方法与结论边界见 `docs/paper_v1_protocol.md`。旧 `metrics/` 和 `validation/`
+不会被覆盖。
+
+如果一个 suite 中只有部分模型已经完成兼容的 hidden-state 提取，可只对这些
+模型做离线复算；缺失模型会被列出，但不会被自动启动：
+
+```bash
+python src/run_paper_suite.py \
+  --suite configs/model_suite_24lang.json \
+  --resume
+```
+
+正式随机样本的服务器执行顺序、断点语义和“旧结果复算/正式结果”边界见
+`docs/服务器执行指南_paper_v1.md`。冻结后的三模型正式入口为：
+
+```bash
+python src/run_formal_suite.py \
+  --suite configs/model_suite_paper_v1_random200.json \
+  --resume
 ```
 
 首个模型准备一次 FLORES 数据；后续模型复用经过哈希核对的完全相同数据。最后自动生成归一化层深的跨模型比较。

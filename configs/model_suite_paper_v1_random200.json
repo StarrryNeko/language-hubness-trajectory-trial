@@ -1,0 +1,12 @@
+{
+  "configs": [
+    "qwen25_1_5b_paper_v1.json",
+    "bloom_1b7_paper_v1.json",
+    "xglm_1b7_paper_v1.json"
+  ],
+  "comparison_output_dir": "outputs_paper_v1/model_comparison_random200",
+  "sample_selection_strategy": "random_without_replacement",
+  "sample_selection_seed": 20260801,
+  "sample_size_per_language": 200,
+  "model_list_frozen_before_results": true
+}

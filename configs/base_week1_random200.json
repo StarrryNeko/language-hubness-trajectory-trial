@@ -1,0 +1,20 @@
+{
+  "extends": "base_24lang_same_semantics.json",
+  "device": "auto",
+  "dtype": "bfloat16",
+  "storage_dtype": "float32",
+  "dataset": {
+    "sample_size_per_language": 200,
+    "sample_selection": {
+      "strategy": "random_without_replacement",
+      "seed": 20260801
+    }
+  },
+  "paper_v1": {
+    "seed": 20260801,
+    "bootstrap_samples": 500,
+    "label_permutations": 500,
+    "sample_robustness_size": 100
+  },
+  "comparison_metadata_required": true
+}

@@ -1,0 +1,15 @@
+{
+  "extends": "base_week1_random200.json",
+  "experiment_name": "llama31_8b_week1_random200",
+  "model": {
+    "name_or_path": "meta-llama/Llama-3.1-8B",
+    "family": "Llama",
+    "generation": "Llama3.1",
+    "parameter_count_billions": 8.03,
+    "size_class": "M",
+    "training_stage": "pretraining",
+    "architecture_type": "dense",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs_week1/llama31_8b_random200"
+}

@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -16,6 +17,7 @@ from common import (
     ensure_dirs,
     load_config,
     read_jsonl,
+    select_semantic_indices,
     set_seed,
     validate_language_inventory,
     write_jsonl,
@@ -136,6 +138,10 @@ def main():
         print(f"Copied local dataset from {input_path} to {out_path}")
     else:
         rows = []
+        selected_indices = None
+        selection_cfg = dataset_cfg.get("sample_selection", {})
+        selection_strategy = selection_cfg.get("strategy", "first_n")
+        selection_seed = int(selection_cfg.get("seed", cfg.get("seed", 42)))
         dataset_name = dataset_cfg.get(
             "dataset_name",
             "openlanguagedata/flores_plus" if source == "flores_plus" else "facebook/flores",
@@ -153,7 +159,16 @@ def main():
                 load_kwargs["token"] = True
             ds = load_dataset(dataset_name, flores_lang, **load_kwargs)
             limit = min(sample_size, len(ds))
-            for idx in range(limit):
+            if selected_indices is None:
+                selected_indices = select_semantic_indices(
+                    len(ds), limit, selection_strategy, selection_seed
+                )
+            if len(selected_indices) != limit or max(selected_indices, default=-1) >= len(ds):
+                raise ValueError(
+                    "FLORES language splits do not support one shared semantic-index sample: "
+                    f"language={short_lang}, rows={len(ds)}, requested_indices={len(selected_indices)}"
+                )
+            for idx in selected_indices:
                 row = ds[idx]
                 rows.append(
                     {
@@ -182,6 +197,31 @@ def main():
         "known_suffix_replacements": suffix_replacements,
         "source_rows_matching_known_suffix": len(cleaning_audit),
         "suffix_cleaning_audit": cleaning_audit,
+        "sample_selection_strategy": (
+            dataset_cfg.get("sample_selection", {}).get("strategy", "local_file_order")
+            if source == "local_jsonl" else selection_strategy
+        ),
+        "sample_selection_seed": (
+            dataset_cfg.get("sample_selection", {}).get("seed")
+            if source == "local_jsonl" else selection_seed
+        ),
+        "selected_semantic_indices": (
+            None if source == "local_jsonl" else selected_indices
+        ),
+        "selected_semantic_indices_sha256": (
+            None if source == "local_jsonl" else hashlib.sha256(
+                "\n".join(map(str, selected_indices)).encode("utf-8")
+            ).hexdigest()
+        ),
+        "data_content_sha256": hashlib.sha256(
+            "\n".join(
+                json.dumps(
+                    {"id": str(row["id"]), "lang": str(row["lang"]), "text": str(row["text"])},
+                    sort_keys=True, ensure_ascii=False,
+                )
+                for row in rows
+            ).encode("utf-8")
+        ).hexdigest(),
     })
     manifest_path = Path(paths["data"]) / "dataset_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")

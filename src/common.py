@@ -9,6 +9,57 @@ import numpy as np
 MODEL_SIZE_CLASSES = ("S", "M", "L")
 
 
+def portable_model_directory_name(model_id):
+    """Return the stable folder name used by portable/offline model bundles."""
+    text = str(model_id).strip().replace("\\", "/").strip("/")
+    if not text:
+        raise ValueError("model ID must be non-empty")
+    return text.replace("/", "__")
+
+
+def resolve_model_source(model_id, explicit_local_path=None, model_root=None):
+    """Resolve a configured model ID to an uploaded local directory when present.
+
+    The canonical Hugging Face ID remains the experiment identity.  A local path is
+    only a transport/runtime source and therefore must not change manifests or
+    extraction reuse checks.
+    """
+    canonical = str(model_id)
+    candidates = []
+    if explicit_local_path:
+        candidates.append(Path(os.path.expandvars(os.path.expanduser(str(explicit_local_path)))))
+    root = model_root or os.environ.get("LHT_MODEL_ROOT")
+    if root:
+        candidates.append(
+            Path(os.path.expandvars(os.path.expanduser(str(root))))
+            / portable_model_directory_name(canonical)
+        )
+    for candidate in candidates:
+        if candidate.is_dir():
+            return canonical, str(candidate.resolve()), True
+    if explicit_local_path:
+        raise FileNotFoundError(
+            f"Configured local model directory does not exist: {explicit_local_path}"
+        )
+    return canonical, canonical, False
+
+
+def select_semantic_indices(row_count, sample_size, strategy, seed):
+    """Select one reproducible semantic-index set shared by every language."""
+    row_count = int(row_count)
+    sample_size = min(int(sample_size), row_count)
+    if row_count < 1 or sample_size < 1:
+        raise ValueError("dataset split and requested sample must be non-empty")
+    if strategy == "first_n":
+        return list(range(sample_size))
+    if strategy == "random_without_replacement":
+        selected = random.Random(int(seed)).sample(range(row_count), sample_size)
+        return sorted(selected)
+    raise ValueError(
+        "dataset.sample_selection.strategy must be first_n or random_without_replacement"
+    )
+
+
 def classify_model_size(parameter_count_billions):
     """Classify dense models by total parameter count, not checkpoint bytes."""
     count = float(parameter_count_billions)
