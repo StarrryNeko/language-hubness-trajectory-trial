@@ -253,6 +253,20 @@ paper_v1/figures/source_candidate_attraction_peak_layer.png
 
 ## 五、正式五模型实验
 
+### 5.1 权重未全部到齐时先运行成员A四模型
+
+成员A的四个模型已上传并通过运行审计后，可以先执行：
+
+```bash
+python -u src/run_formal_suite.py \
+  --suite configs/model_suite_week1_member_a_random200.json \
+  --resume 2>&1 | tee logs/week1_member_a.log
+```
+
+该子清单与正式清单使用完全相同的随机200-ID、种子、配置文件和逐模型输出目录，只把跨模型比较写入独立目录。它不改变预先冻结的五模型设计。第五个模型到位后运行下方正式五模型命令；`--resume`会复用通过manifest、revision、配置和数据哈希检查的前四个模型，仅提取新增模型并重做五模型比较。
+
+### 5.2 五模型正式汇总
+
 确认代码、配置和旧hidden复算均通过后，保存git commit或源码压缩包哈希，然后运行：
 
 ```bash
