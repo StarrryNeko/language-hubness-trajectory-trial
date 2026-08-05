@@ -1,0 +1,14 @@
+{
+  "configs": [
+    "bloom_1b7_week1.json",
+    "xglm_1b7_week1.json",
+    "llama32_3b_week1.json"
+  ],
+  "comparison_output_dir": "outputs_week1/model_comparison_available_three_random200",
+  "sample_selection_strategy": "random_without_replacement",
+  "sample_selection_seed": 20260801,
+  "sample_size_per_language": 200,
+  "model_list_frozen_before_results": true,
+  "execution_subset_of": "model_suite_week1_member_a_random200.json",
+  "subset_purpose": "Run BLOOM, XGLM, and Llama-3.2-3B while the Qwen checkpoint transfer is incomplete; do not treat this subset as the final confirmatory model comparison."
+}

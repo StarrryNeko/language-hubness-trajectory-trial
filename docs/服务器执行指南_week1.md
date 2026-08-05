@@ -255,6 +255,16 @@ paper_v1/figures/source_candidate_attraction_peak_layer.png
 
 ### 5.1 权重未全部到齐时先运行成员A四模型
 
+如果Qwen权重仍在传输，但BLOOM、XGLM和Llama-3.2-3B已经通过目录验证和运行审计，可以先运行三模型执行子集：
+
+```bash
+python -u src/run_formal_suite.py \
+  --suite configs/model_suite_week1_available_three_random200.json \
+  --resume 2>&1 | tee logs/week1_available_three.log
+```
+
+三模型子集使用与四模型、五模型清单完全相同的数据选择协议和逐模型配置。它只用于提前完成可用模型的提取与分析，不能作为最终确认性跨模型比较。Qwen到位后继续使用下方四模型清单并加`--resume`。
+
 成员A的四个模型已上传并通过运行审计后，可以先执行：
 
 ```bash
