@@ -1,0 +1,16 @@
+{
+  "configs": [
+    "bloom_1b7_week1.json",
+    "xglm_1b7_week1.json",
+    "llama32_3b_week1.json",
+    "qwen25_1_5b_week1.json"
+  ],
+  "comparison_output_dir": "outputs_week1/model_comparison_member_a_random200",
+  "sample_selection_strategy": "random_without_replacement",
+  "sample_selection_seed": 20260801,
+  "sample_size_per_language": 200,
+  "model_list_frozen_before_results": true,
+  "execution_subset_of": "model_suite_week1_required_random200.json",
+  "resume_source_suite": "model_suite_week1_available_three_random200.json",
+  "subset_purpose": "Resume the completed BLOOM-XGLM-Llama three-model run, copy its identical prepared data to Qwen, run only missing Qwen work, and regenerate the four-model comparison."
+}

@@ -265,6 +265,16 @@ python -u src/run_formal_suite.py \
 
 三模型子集使用与四模型、五模型清单完全相同的数据选择协议和逐模型配置。它只用于提前完成可用模型的提取与分析，不能作为最终确认性跨模型比较。Qwen到位后继续使用下方四模型清单并加`--resume`。
 
+如果三模型已经全部完成、Qwen随后才到位，优先使用专门的续跑清单：
+
+```bash
+python -u src/run_formal_suite.py \
+  --suite configs/model_suite_week1_member_a_resume_from_three_random200.json \
+  --resume 2>&1 | tee logs/week1_member_a_resume_from_three.log
+```
+
+该清单把已经准备数据的BLOOM放在第一位、Qwen放在最后，因此严格离线时也能把三模型使用的同一份数据安全复制给Qwen。完成后会生成正式的四模型比较目录，不需要重新下载FLORES或重算三个已完成模型。
+
 成员A的四个模型已上传并通过运行审计后，可以先执行：
 
 ```bash
