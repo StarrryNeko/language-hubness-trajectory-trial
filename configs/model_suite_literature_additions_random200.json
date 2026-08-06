@@ -1,0 +1,23 @@
+{
+  "configs": [
+    "bloom_3b_week1.json",
+    "xglm_2_9b_week1.json",
+    "mistral_7b_v01_week1.json",
+    "aya_23_8b_week1.json"
+  ],
+  "comparison_output_dir": "outputs_week1/model_comparison_literature_additions_random200",
+  "sample_selection_strategy": "random_without_replacement",
+  "sample_selection_seed": 20260801,
+  "sample_size_per_language": 200,
+  "model_list_frozen_before_results": true,
+  "analysis_groups": {
+    "base_checkpoints": [
+      "bigscience/bloom-3b",
+      "facebook/xglm-2.9B",
+      "mistralai/Mistral-7B-v0.1"
+    ],
+    "instruction_tuned_extension": [
+      "CohereLabs/aya-23-8B"
+    ]
+  }
+}

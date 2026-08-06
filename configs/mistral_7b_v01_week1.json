@@ -1,0 +1,15 @@
+{
+  "extends": "base_week1_random200.json",
+  "experiment_name": "mistral_7b_v01_week1_random200",
+  "model": {
+    "name_or_path": "mistralai/Mistral-7B-v0.1",
+    "family": "Mistral",
+    "generation": "Mistral-v0.1",
+    "parameter_count_billions": 7.24,
+    "size_class": "M",
+    "training_stage": "pretraining",
+    "architecture_type": "dense",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs_week1/mistral_7b_v01_random200"
+}

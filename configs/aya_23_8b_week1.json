@@ -1,0 +1,15 @@
+{
+  "extends": "base_week1_random200.json",
+  "experiment_name": "aya_23_8b_week1_random200",
+  "model": {
+    "name_or_path": "CohereLabs/aya-23-8B",
+    "family": "Aya",
+    "generation": "Aya-23",
+    "parameter_count_billions": 8.03,
+    "size_class": "M",
+    "training_stage": "instruction_tuning",
+    "architecture_type": "dense",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs_week1/aya_23_8b_random200"
+}

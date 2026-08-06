@@ -15,7 +15,7 @@ from common import load_config, portable_model_directory_name
 
 
 PORTABLE_ALLOW_PATTERNS = [
-    "*.safetensors", "*.safetensors.index.json", "pytorch_model*.bin",
+    "*.safetensors.index.json",
     "*.json", "*.py", "*.model", "*.tiktoken", "tokenizer.*",
     "tokenizer*", "vocab.*", "merges.txt", "added_tokens.json",
 ]
@@ -152,12 +152,36 @@ def main():
             "repo_id": item["model_id"],
             "revision": resolved_revision,
         }
+        weight_format = None
         if portable_root:
+            repo_files = api.list_repo_files(
+                item["model_id"], revision=resolved_revision
+            )
+            # Some repositories publish the same weights in both safetensors and
+            # PyTorch .bin format. Downloading both nearly doubles local storage
+            # and upload time without adding experimental value. Prefer the safer
+            # safetensors representation and fall back to .bin only when needed.
+            if any(name.endswith(".safetensors") for name in repo_files):
+                weight_patterns = ["*.safetensors"]
+                weight_format = "safetensors"
+            elif any(
+                Path(name).name.startswith("pytorch_model")
+                and name.endswith(".bin")
+                for name in repo_files
+            ):
+                weight_patterns = ["pytorch_model*.bin"]
+                weight_format = "pytorch_bin"
+            else:
+                raise FileNotFoundError(
+                    f"No supported model weights found in {item['model_id']} "
+                    f"at revision {resolved_revision}"
+                )
+            print(f"Selected weight format: {weight_format}")
             target = portable_root / portable_model_directory_name(item["model_id"])
             target.mkdir(parents=True, exist_ok=True)
             kwargs.update({
                 "local_dir": str(target),
-                "allow_patterns": PORTABLE_ALLOW_PATTERNS,
+                "allow_patterns": PORTABLE_ALLOW_PATTERNS + weight_patterns,
                 "ignore_patterns": PORTABLE_IGNORE_PATTERNS,
             })
         else:
@@ -171,6 +195,7 @@ def main():
                     "model_id": item["model_id"],
                     "configured_revision": item["revision"],
                     "resolved_revision": resolved_revision,
+                    "weight_format": weight_format,
                 }, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
@@ -178,6 +203,7 @@ def main():
             **item,
             "configured_revision": item["revision"],
             "resolved_revision": resolved_revision,
+            "weight_format": weight_format,
             "local_path": str(Path(local_path).resolve()),
         }
         if portable_root:

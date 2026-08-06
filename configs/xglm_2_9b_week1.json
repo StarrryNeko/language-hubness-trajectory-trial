@@ -1,0 +1,15 @@
+{
+  "extends": "base_week1_random200.json",
+  "experiment_name": "xglm_2_9b_week1_random200",
+  "model": {
+    "name_or_path": "facebook/xglm-2.9B",
+    "family": "XGLM",
+    "generation": "XGLM",
+    "parameter_count_billions": 2.9,
+    "size_class": "S",
+    "training_stage": "pretraining",
+    "architecture_type": "dense",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs_week1/xglm_2_9b_random200"
+}

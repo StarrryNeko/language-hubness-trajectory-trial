@@ -1,0 +1,15 @@
+{
+  "extends": "base_week1_random200.json",
+  "experiment_name": "bloom_3b_week1_random200",
+  "model": {
+    "name_or_path": "bigscience/bloom-3b",
+    "family": "BLOOM",
+    "generation": "BLOOM",
+    "parameter_count_billions": 3.0,
+    "size_class": "S",
+    "training_stage": "pretraining",
+    "architecture_type": "dense",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs_week1/bloom_3b_random200"
+}
