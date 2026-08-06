@@ -1,0 +1,13 @@
+{
+  "configs": [
+    "xglm_1b7_replication_seed20260806.json",
+    "mistral_7b_v01_replication_seed20260806.json",
+    "aya_23_8b_replication_seed20260806.json"
+  ],
+  "comparison_output_dir": "outputs_replication_seed20260806/model_comparison_three",
+  "sample_selection_strategy": "random_without_replacement",
+  "sample_selection_seed": 20260806,
+  "sample_size_per_language": 200,
+  "model_list_frozen_before_replication": true,
+  "selection_rule": "strong raw hub, negative control, instruction-tuned extension"
+}

@@ -1,0 +1,19 @@
+{
+  "configs": [
+    "qwen25_1_5b_week1.json",
+    "bloom_1b7_week1.json",
+    "xglm_1b7_week1.json",
+    "llama32_3b_week1.json",
+    "bloom_3b_week1.json",
+    "xglm_2_9b_week1.json",
+    "mistral_7b_v01_week1.json",
+    "aya_23_8b_week1.json"
+  ],
+  "comparison_output_dir": "outputs_week1/model_comparison_all_eight_random200",
+  "sample_selection_strategy": "random_without_replacement",
+  "sample_selection_seed": 20260801,
+  "sample_size_per_language": 200,
+  "model_list_frozen_before_results": false,
+  "analysis_role": "post-hoc unified comparison of two prespecified execution batches",
+  "interpretation_boundary": "Do not present this merged suite as a preregistered eight-model confirmatory list."
+}

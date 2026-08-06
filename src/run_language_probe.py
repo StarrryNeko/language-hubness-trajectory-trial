@@ -68,7 +68,9 @@ def main():
     c_values = [float(value) for value in cfg.get("paper_v1", {}).get("probe_c_values", [1.0])]
     if not c_values or any(value <= 0 for value in c_values):
         raise ValueError("paper_v1.probe_c_values must contain positive values")
-    n_permutations = int(cfg.get("paper_v1", {}).get("probe_permutations", 20))
+    n_permutations = int(cfg.get("paper_v1", {}).get("probe_permutations", 0))
+    if n_permutations < 0:
+        raise ValueError("paper_v1.probe_permutations must be non-negative")
     rng = np.random.default_rng(settings["seed"] + 301)
     score_records = []
     confusion_records = []
@@ -102,8 +104,10 @@ def main():
             permutation_scores.append(
                 f1_score(labels[masks["test"]], perm_prediction, average="macro")
             )
-        empirical_p = (1 + sum(value >= macro_f1 for value in permutation_scores)) / (
-            1 + len(permutation_scores)
+        empirical_p = (
+            (1 + sum(value >= macro_f1 for value in permutation_scores))
+            / (1 + len(permutation_scores))
+            if permutation_scores else None
         )
         score_records.append({
             "representation": "mean_pool",
@@ -113,9 +117,13 @@ def main():
             "balanced_accuracy": float(balanced),
             "selected_c": selected_c,
             "validation_macro_f1": float(best[0]),
-            "permutation_macro_f1_mean": float(np.mean(permutation_scores)),
-            "permutation_macro_f1_std": float(np.std(permutation_scores)),
-            "empirical_p_value": float(empirical_p),
+            "permutation_macro_f1_mean": (
+                float(np.mean(permutation_scores)) if permutation_scores else None
+            ),
+            "permutation_macro_f1_std": (
+                float(np.std(permutation_scores)) if permutation_scores else None
+            ),
+            "empirical_p_value": empirical_p,
             "chance_level": 1 / len(dataset.languages),
             "n_train_semantic_ids": len(split["train"]),
             "n_validation_semantic_ids": len(split["validation"]),
@@ -147,6 +155,9 @@ def main():
         "classifier": "multinomial logistic regression (lbfgs)",
         "c_values": c_values,
         "label_permutations": n_permutations,
+        "inference_mode": (
+            "permutation_test" if n_permutations >= 199 else "effect_size_only"
+        ),
         "primary_metric": "macro_f1",
         "claim_boundary": "linear decodability is not evidence of active model use",
         "output_files": ["probe_scores.csv", "probe_confusion.csv"],
@@ -159,7 +170,8 @@ def main():
             "split_disjoint": True,
             "standardizer_train_only": True,
             "hyperparameter_selection_validation_only": True,
-            "label_permutation_baseline_saved": True,
+            "label_permutation_baseline_saved": n_permutations > 0,
+            "inferential_p_value_claim_allowed": n_permutations >= 199,
         },
     }
     (paths.validation / "11_language_probe.json").write_text(
@@ -170,4 +182,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

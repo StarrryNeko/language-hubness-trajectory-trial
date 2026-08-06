@@ -133,6 +133,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--suite", required=True)
     parser.add_argument("--output-root", required=True)
+    parser.add_argument(
+        "--model",
+        action="append",
+        default=[],
+        help="Download only this exact model ID; repeat to select multiple models.",
+    )
     parser.add_argument("--max-retries", type=int, default=100)
     args = parser.parse_args()
 
@@ -141,7 +147,17 @@ def main():
     api = HfApi()
     records = []
 
-    for index, item in enumerate(models_from_suite(args.suite), 1):
+    models = models_from_suite(args.suite)
+    if args.model:
+        selected = set(args.model)
+        models = [item for item in models if item["model_id"] in selected]
+        missing = selected - {item["model_id"] for item in models}
+        if missing:
+            raise ValueError(f"Requested models are absent from suite: {sorted(missing)}")
+    if not models:
+        raise ValueError("No models selected")
+
+    for index, item in enumerate(models, 1):
         print(f"\n[{index}] {item['model_id']}", flush=True)
         info = api.model_info(
             item["model_id"], revision=item["revision"], files_metadata=True

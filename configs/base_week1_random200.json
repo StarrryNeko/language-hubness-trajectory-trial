@@ -14,6 +14,7 @@
     "seed": 20260801,
     "bootstrap_samples": 500,
     "label_permutations": 500,
+    "probe_permutations": 0,
     "sample_robustness_size": 100
   },
   "comparison_metadata_required": true

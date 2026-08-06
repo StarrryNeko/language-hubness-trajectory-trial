@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import random
 from pathlib import Path
@@ -7,6 +8,34 @@ import numpy as np
 
 
 MODEL_SIZE_CLASSES = ("S", "M", "L")
+
+
+def json_compatible(value):
+    """Recursively replace non-finite numbers with standards-compliant JSON null."""
+    if isinstance(value, dict):
+        return {str(key): json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_compatible(item) for item in value]
+    if isinstance(value, np.generic):
+        return json_compatible(value.item())
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def json_dumps_strict(value, **kwargs):
+    """Serialize portable JSON; undefined numerical summaries become null."""
+    return json.dumps(json_compatible(value), allow_nan=False, **kwargs)
+
+
+def write_json(path, value, **kwargs):
+    """Write strict UTF-8 JSON and create the destination directory."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    options = {"indent": 2, "ensure_ascii": False, **kwargs}
+    destination.write_text(json_dumps_strict(value, **options), encoding="utf-8")
 
 
 def portable_model_directory_name(model_id):
@@ -223,7 +252,7 @@ def write_jsonl(path, rows):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            f.write(json_dumps_strict(row, ensure_ascii=False) + "\n")
 
 
 def l2_normalize(x, axis=-1, eps=1e-12):

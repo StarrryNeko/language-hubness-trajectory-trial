@@ -1,0 +1,14 @@
+{
+  "extends": "mistral_7b_v01_week1.json",
+  "experiment_name": "mistral_7b_v01_replication_seed20260806",
+  "output_dir": "outputs_replication_seed20260806/mistral_7b_v01_random200",
+  "dataset": {
+    "sample_selection": {
+      "strategy": "random_without_replacement",
+      "seed": 20260806
+    }
+  },
+  "paper_v1": {
+    "seed": 20260806
+  }
+}

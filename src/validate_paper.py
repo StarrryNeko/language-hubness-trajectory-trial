@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from common import load_config
+from common import load_config, write_json
 from evidence_rules import max_consecutive_layers
 from paper_common import ensure_paper_dirs, load_hidden_dataset, semantic_id_hash
 
@@ -19,6 +19,50 @@ def require_columns(frame, columns, name):
         raise ValueError(f"{name} is missing columns: {sorted(missing)}")
     if frame.empty:
         raise ValueError(f"{name} is empty")
+
+
+def classify_paper_claim(
+    blockers,
+    alignment_status,
+    english_specificity_status,
+    competition_status,
+    hubness_status,
+    sample_status,
+):
+    """Bound positive English-hub claims by the formal hubness evidence gate."""
+    if blockers:
+        return "NEEDS_REVISION", "NO_PAPER_CLAIM"
+    if alignment_status != "SUPPORTED":
+        return "SHARE_WITH_CAVEATS", "GEOMETRY_ONLY_NO_SHARED_SEMANTIC_CLAIM"
+    if hubness_status == "NOT_SUPPORTED":
+        if english_specificity_status == "SELECTION_CORRECTED":
+            return (
+                "READY_FOR_MODEL_COMPARISON",
+                "ENGLISH_TARGET_BIAS_WITHOUT_ROBUST_HUBNESS",
+            )
+        return "READY_FOR_MODEL_COMPARISON", "NO_ROBUST_ENGLISH_HUBNESS"
+    if english_specificity_status != "SELECTION_CORRECTED":
+        return (
+            "READY_FOR_MODEL_COMPARISON",
+            "MULTILINGUAL_HUB_STRUCTURE_WITHOUT_ENGLISH_SPECIFICITY",
+        )
+    if hubness_status == "DENSITY_SENSITIVE":
+        return "READY_FOR_MODEL_COMPARISON", "DENSITY_SENSITIVE_ENGLISH_PATTERN"
+    if competition_status == "NOT_SUPPORTED":
+        return (
+            "READY_FOR_MODEL_COMPARISON",
+            "ENGLISH_HUB_WITHOUT_STRONGEST_COMPETITOR_ADVANTAGE",
+        )
+    if (
+        hubness_status == "ROBUST"
+        and competition_status == "ROBUST"
+        and sample_status == "REPLICATED"
+    ):
+        return (
+            "READY_FOR_MODEL_COMPARISON",
+            "GEOMETRY_ROBUST_COMPETITIVE_ENGLISH_SPECIFIC_HUB",
+        )
+    return "READY_FOR_MODEL_COMPARISON", "ENGLISH_SPECIFICITY_WITH_LIMITED_ROBUSTNESS"
 
 
 def main():
@@ -258,11 +302,27 @@ def main():
         probe = pd.read_csv(probe_path)
         require_columns(probe, ["layer", "macro_f1", "empirical_p_value"], "probe_scores")
         best_probe = probe.loc[probe.macro_f1.idxmax()]
-        probe_status = "AVAILABLE"
+        probe_manifest_path = paths.metrics / "language_probe" / "probe_manifest.json"
+        probe_manifest = (
+            json.loads(probe_manifest_path.read_text(encoding="utf-8"))
+            if probe_manifest_path.exists() else {}
+        )
+        probe_permutations = int(probe_manifest.get("label_permutations", 0))
+        probe_status = (
+            "INFERENTIAL" if probe_permutations >= 199 else "DESCRIPTIVE_EFFECT_ONLY"
+        )
         probe_details = {
             "peak_macro_f1": float(best_probe.macro_f1),
             "peak_layer": int(best_probe.layer),
-            "peak_empirical_p_value": float(best_probe.empirical_p_value),
+            "peak_empirical_p_value": (
+                float(best_probe.empirical_p_value)
+                if pd.notna(best_probe.empirical_p_value) else None
+            ),
+            "label_permutations": probe_permutations,
+            "inference_boundary": (
+                "effect size only; no p-value claim"
+                if probe_permutations < 199 else "permutation inference available"
+            ),
         }
     else:
         probe_status, probe_details = "NOT_RUN", {}
@@ -273,27 +333,14 @@ def main():
     if language_structure_status == "NOT_RUN":
         blockers.append("language structure has not been run")
 
-    if blockers:
-        overall = "NEEDS_REVISION"
-        claim_level = "NO_PAPER_CLAIM"
-    elif alignment_status != "SUPPORTED":
-        overall = "SHARE_WITH_CAVEATS"
-        claim_level = "GEOMETRY_ONLY_NO_SHARED_SEMANTIC_CLAIM"
-    elif english_specificity_status != "SELECTION_CORRECTED":
-        overall = "READY_FOR_MODEL_COMPARISON"
-        claim_level = "MULTILINGUAL_HUB_STRUCTURE_WITHOUT_ENGLISH_SPECIFICITY"
-    elif competition_status == "NOT_SUPPORTED":
-        overall = "READY_FOR_MODEL_COMPARISON"
-        claim_level = "ENGLISH_HUB_WITHOUT_STRONGEST_COMPETITOR_ADVANTAGE"
-    elif hubness_status == "ROBUST" and competition_status == "ROBUST" and sample_status == "REPLICATED":
-        overall = "READY_FOR_MODEL_COMPARISON"
-        claim_level = "GEOMETRY_ROBUST_COMPETITIVE_ENGLISH_SPECIFIC_HUB"
-    elif hubness_status == "DENSITY_SENSITIVE":
-        overall = "READY_FOR_MODEL_COMPARISON"
-        claim_level = "DENSITY_SENSITIVE_ENGLISH_PATTERN"
-    else:
-        overall = "READY_FOR_MODEL_COMPARISON"
-        claim_level = "ENGLISH_SPECIFICITY_WITH_LIMITED_ROBUSTNESS"
+    overall, claim_level = classify_paper_claim(
+        blockers,
+        alignment_status,
+        english_specificity_status,
+        competition_status,
+        hubness_status,
+        sample_status,
+    )
     scientific_claim_level = claim_level
     if not blockers and experiment_stage != "FORMAL_RANDOM_SAMPLE":
         overall = "METHOD_REANALYSIS_ONLY"
@@ -335,9 +382,7 @@ def main():
             "geometry and layer trajectories. They do not establish behavioral causality."
         ),
     }
-    (paths.validation / "paper_validation_summary.json").write_text(
-        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    write_json(paths.validation / "paper_validation_summary.json", summary)
     lines = [
         "# paper_v1 validation summary", "",
         f"- Overall assessment: `{overall}`",

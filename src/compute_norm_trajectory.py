@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import json
-
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 
-from common import l2_normalize, load_config
+from common import l2_normalize, load_config, write_json
 from paper_common import (
     ensure_paper_dirs,
     group_vectors,
@@ -323,9 +321,7 @@ def main():
     )
     if event_frame is not None:
         event_frame.to_csv(output / "english_trajectory_events.csv", index=False, encoding="utf-8")
-        (output / "english_trajectory_events_summary.json").write_text(
-            json.dumps(event_summary, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        write_json(output / "english_trajectory_events_summary.json", event_summary)
     association_records = []
     if score is not None:
         for layer in range(n_layers):
@@ -380,8 +376,9 @@ def main():
         ],
     }
     write_manifest(output / "norm_trajectory_manifest.json", manifest_payload)
-    (paths.validation / "16_17_norm_trajectory.json").write_text(
-        json.dumps({
+    write_json(
+        paths.validation / "16_17_norm_trajectory.json",
+        {
             "module": "16_17_norm_trajectory",
             "status": "PASS",
             "checks": {
@@ -402,7 +399,7 @@ def main():
                 "trajectory_events_available": event_summary is not None,
             },
             "trajectory_summary": event_summary,
-        }, indent=2, ensure_ascii=False), encoding="utf-8"
+        },
     )
     print(f"Saved norm and trajectory outputs to {output}")
 

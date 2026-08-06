@@ -1,0 +1,14 @@
+{
+  "extends": "xglm_1b7_week1.json",
+  "experiment_name": "xglm_1b7_replication_seed20260806",
+  "output_dir": "outputs_replication_seed20260806/xglm_1b7_random200",
+  "dataset": {
+    "sample_selection": {
+      "strategy": "random_without_replacement",
+      "seed": 20260806
+    }
+  },
+  "paper_v1": {
+    "seed": 20260806
+  }
+}

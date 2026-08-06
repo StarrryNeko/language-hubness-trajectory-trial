@@ -20,6 +20,7 @@ from common import (
     l2_normalize,
     representation_file_map,
     validate_language_inventory,
+    write_json,
 )
 from numerical_validation import validate_representation_array
 
@@ -237,7 +238,7 @@ def load_or_create_splits(path, semantic_ids, seed, ratios=(0.6, 0.2, 0.2)) -> d
             raise ValueError(f"frozen split {path} does not partition the current semantic IDs")
         return actual
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(expected, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_json(path, expected)
     return expected
 
 
@@ -255,5 +256,4 @@ def group_vectors(dataset: HiddenDataset, semantic_ids, layer, normalize=True) -
 
 def write_manifest(path, payload):
     body = {"protocol_version": PAPER_PROTOCOL_VERSION, **payload}
-    Path(path).write_text(json.dumps(body, indent=2, ensure_ascii=False), encoding="utf-8")
-
+    write_json(path, body)
