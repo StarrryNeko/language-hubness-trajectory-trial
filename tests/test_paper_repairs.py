@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from audit_checkpoint_identity import checkpoint_inventory
 from common import json_dumps_strict, write_json
-from repair_paper_outputs import strict_json_audit
+from repair_paper_outputs import strict_json_audit, worker_environment
 from validate_paper import classify_paper_claim
 
 
@@ -60,6 +60,14 @@ class PaperRepairTests(unittest.TestCase):
             second = checkpoint_inventory(root)
             self.assertNotEqual(first["checkpoint_sha256"], second["checkpoint_sha256"])
             self.assertEqual(second["weight_file_count"], 1)
+
+    def test_worker_environment_caps_all_native_thread_pools(self):
+        environment = worker_environment(6)
+        for name in (
+            "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+        ):
+            self.assertEqual(environment[name], "6")
 
 
 if __name__ == "__main__":
