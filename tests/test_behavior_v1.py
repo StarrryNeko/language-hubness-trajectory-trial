@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from common import select_semantic_indices_excluding
 from compute_behavior_association import benjamini_hochberg
 from evaluate_behavior_outputs import LanguageIdentifier
-from export_behavior_predictors import similarity_matrices
+from export_behavior_predictors import align_semantic_ids, similarity_matrices
 from prepare_behavior_tasks import build_tasks
 
 
@@ -76,6 +76,13 @@ class BehaviorV1Tests(unittest.TestCase):
         np.testing.assert_allclose(cosine, expected, atol=1e-6)
         self.assertEqual(scaled.shape, (4, 5, 5))
         np.testing.assert_allclose(np.diagonal(scaled, axis1=1, axis2=2), 1.0)
+
+    def test_behavior_ids_align_after_csv_strips_leading_zeroes(self):
+        task_ids, hidden_ids = align_semantic_ids(
+            ["00040", "00049", "00102"], ["40", "49", "102"]
+        )
+        self.assertEqual(task_ids, ["00040", "00049", "00102"])
+        self.assertEqual(hidden_ids, ["40", "49", "102"])
 
 
 if __name__ == "__main__":

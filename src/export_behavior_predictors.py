@@ -22,6 +22,34 @@ def descending_rank(values, index):
     return int(np.where(order == int(index))[0][0]) + 1
 
 
+def canonical_semantic_id(value):
+    """Match JSONL IDs such as 00040 to CSV-inferred IDs such as 40."""
+    text = str(value).strip()
+    if text.isdigit():
+        return str(int(text))
+    return text
+
+
+def align_semantic_ids(task_ids, hidden_ids):
+    task_ids = sorted({str(value) for value in task_ids}, key=lambda value: int(value))
+    hidden_by_canonical = {}
+    for hidden_id in hidden_ids:
+        canonical = canonical_semantic_id(hidden_id)
+        if canonical in hidden_by_canonical:
+            raise ValueError(f"hidden data has colliding semantic IDs after normalization: {canonical}")
+        hidden_by_canonical[canonical] = str(hidden_id)
+    missing = [
+        task_id for task_id in task_ids
+        if canonical_semantic_id(task_id) not in hidden_by_canonical
+    ]
+    if missing:
+        raise ValueError(f"behavior tasks are absent from hidden data: {missing[:5]}")
+    aligned_hidden_ids = [
+        hidden_by_canonical[canonical_semantic_id(task_id)] for task_id in task_ids
+    ]
+    return task_ids, aligned_hidden_ids
+
+
 def fit_pc1(vectors, seed):
     values = np.asarray(vectors, dtype=np.float64)
     estimator = PCA(n_components=1, svd_solver="randomized", random_state=int(seed))
@@ -83,20 +111,19 @@ def main():
     maximum_layer = int(dataset.vectors.shape[1]) - 1
     if min(layers) < 0 or max(layers) > maximum_layer:
         raise ValueError(f"behavior analysis layers must be within 0..{maximum_layer}: {layers}")
-    semantic_ids = sorted({str(task["semantic_id"]) for task in tasks})
-    missing = sorted(set(semantic_ids) - set(dataset.semantic_ids))
-    if missing:
-        raise ValueError(f"behavior tasks are absent from hidden data: {missing[:5]}")
+    semantic_ids, hidden_semantic_ids = align_semantic_ids(
+        (task["semantic_id"] for task in tasks), dataset.semantic_ids
+    )
     task_by_semantic = {}
     for task in tasks:
         task_by_semantic.setdefault(str(task["semantic_id"]), []).append(task)
     records = []
     token_counts = {
-        (str(row["id"]), str(row["lang"])): row.get("sentence_num_tokens")
+        (canonical_semantic_id(row["id"]), str(row["lang"])): row.get("sentence_num_tokens")
         for row in dataset.meta.to_dict("records")
     }
     for layer in layers:
-        raw_groups = group_vectors(dataset, semantic_ids, layer, normalize=False)
+        raw_groups = group_vectors(dataset, hidden_semantic_ids, layer, normalize=False)
         cosine, scaled = similarity_matrices(
             raw_groups, settings["local_scaling_k"], settings["resources"]
         )
@@ -154,8 +181,12 @@ def main():
                     "condition": task["condition"],
                     "source_lang": task["source_lang"],
                     "target_lang": task["target_lang"],
-                    "source_sentence_token_count": token_counts.get((semantic_id, str(task["source_lang"]))),
-                    "target_sentence_token_count": token_counts.get((semantic_id, str(task["target_lang"]))),
+                    "source_sentence_token_count": token_counts.get((
+                        canonical_semantic_id(semantic_id), str(task["source_lang"])
+                    )),
+                    "target_sentence_token_count": token_counts.get((
+                        canonical_semantic_id(semantic_id), str(task["target_lang"])
+                    )),
                     "layer": layer,
                     "normalized_depth": layer / maximum_layer,
                     "source_english_cosine": english_cosine,
