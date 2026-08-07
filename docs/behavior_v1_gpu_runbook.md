@@ -13,12 +13,14 @@
 ```bash
 cd /root/autodl-tmp/language-hubness-trajectory
 
-export LHT_MODEL_ROOT=/root/autodl-tmp/langhub_models
+export LHT_MODEL_ROOT=/root/autodl-tmp/models
 export CUDA_VISIBLE_DEVICES=0
 export CPU_THREADS=24
 
 python -m pip install -r requirements.txt
 ```
+
+包装脚本会忽略终端中可能残留的旧 `LHT_MODEL_ROOT`，默认固定读取 `/root/autodl-tmp/models`。如需在其他服务器改根目录，使用 `BEHAVIOR_MODEL_ROOT=/new/path` 覆盖。
 
 模型目录必须采用项目的 portable 名称：
 
@@ -87,7 +89,7 @@ export VECLIB_MAXIMUM_THREADS=24
 export RAYON_NUM_THREADS=24
 export TOKENIZERS_PARALLELISM=true
 export CUDA_VISIBLE_DEVICES=0
-export LHT_MODEL_ROOT=/root/autodl-tmp/langhub_models
+export LHT_MODEL_ROOT=/root/autodl-tmp/models
 
 python src/run_behavior_suite.py \
   --suite configs/model_suite_behavior_v1.json \

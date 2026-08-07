@@ -13,7 +13,7 @@ export VECLIB_MAXIMUM_THREADS="$CPU_THREADS"
 export RAYON_NUM_THREADS="$CPU_THREADS"
 export TOKENIZERS_PARALLELISM=true
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
-export LHT_MODEL_ROOT="${LHT_MODEL_ROOT:-/root/autodl-tmp/langhub_models}"
+export LHT_MODEL_ROOT="${BEHAVIOR_MODEL_ROOT:-/root/autodl-tmp/models}"
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 SUITE="${BEHAVIOR_SUITE:-configs/model_suite_behavior_v1.json}"
@@ -32,6 +32,19 @@ if [[ ! -d "$LHT_MODEL_ROOT" ]]; then
   echo "Missing portable model root: $LHT_MODEL_ROOT" >&2
   exit 2
 fi
+for model_directory in \
+  facebook__xglm-1.7B \
+  mistralai__Mistral-7B-v0.1 \
+  CohereLabs__aya-23-8B
+do
+  if [[ ! -d "$LHT_MODEL_ROOT/$model_directory" ]]; then
+    echo "Missing behavior model directory: $LHT_MODEL_ROOT/$model_directory" >&2
+    exit 2
+  fi
+done
+
+echo "Model root: $LHT_MODEL_ROOT"
+echo "LID model: $LID_MODEL"
 
 "$PYTHON_BIN" -c "import torch, transformers, pandas, sklearn, statsmodels, sacrebleu, fasttext; print('CUDA', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NONE'); assert torch.cuda.is_available()"
 
