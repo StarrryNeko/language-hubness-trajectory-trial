@@ -130,7 +130,7 @@ def main():
         flat = raw_groups.reshape(-1, raw_groups.shape[-1])
         global_centroid, pc1 = fit_pc1(flat, settings["seed"] + layer)
         english_centered = raw_groups[:, english_index, :] - global_centroid
-        if float(english_centered @ pc1).mean() < 0:
+        if float((english_centered @ pc1).mean()) < 0:
             pc1 = -pc1
         for semantic_position, semantic_id in enumerate(semantic_ids):
             raw_vectors = raw_groups[semantic_position]

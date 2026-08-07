@@ -84,6 +84,12 @@ class BehaviorV1Tests(unittest.TestCase):
         self.assertEqual(task_ids, ["00040", "00049", "00102"])
         self.assertEqual(hidden_ids, ["40", "49", "102"])
 
+    def test_pc1_projection_mean_is_scalar_convertible(self):
+        centered = np.arange(12, dtype=float).reshape(4, 3)
+        direction = np.array([0.2, -0.1, 0.5])
+        projection_mean = float((centered @ direction).mean())
+        self.assertIsInstance(projection_mean, float)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -87,6 +87,8 @@ def main():
                 raise ValueError(f"resume refused: existing generation changed {field}")
         if row.get("checkpoint_sha256") != checkpoint["checkpoint_sha256"]:
             raise ValueError("resume refused: existing generation checkpoint has changed")
+        if row.get("decoding") != settings["decoding"]:
+            raise ValueError("resume refused: existing generation decoding protocol has changed")
 
     runtime = model_settings(cfg)
     if not pending:
