@@ -15,6 +15,12 @@
   "behavior_v1": {
     "primary_layer": 31,
     "analysis_layers": [30, 31, 32],
-    "decoding": {"batch_size": 2, "max_prompt_tokens": 4096}
+    "decoding": {"batch_size": 2, "max_prompt_tokens": 4096},
+    "generation_runtime": {
+      "maximum_batch_size": 64,
+      "minimum_batch_size": 2,
+      "oom_backoff": true,
+      "length_bucketed_batching": true
+    }
   }
 }

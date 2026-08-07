@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import time
 from datetime import datetime, timezone
@@ -77,7 +78,7 @@ def audit_prompt_lengths(tokenizer, tasks, decoding, batch_size=128):
             records.append((str(task["task_id"]), len(token_ids)))
     lengths = np.asarray([length for _, length in records], dtype=int)
     longest_task, maximum = max(records, key=lambda value: value[1])
-    return {
+    summary = {
         "tasks": len(records),
         "minimum_prompt_tokens": int(lengths.min()),
         "median_prompt_tokens": float(np.median(lengths)),
@@ -87,6 +88,7 @@ def audit_prompt_lengths(tokenizer, tasks, decoding, batch_size=128):
         "longest_task_id": longest_task,
         "configured_max_prompt_tokens": int(decoding["max_prompt_tokens"]),
     }
+    return summary, {task_id: length for task_id, length in records}
 
 
 def configured_context_window(model_config, tokenizer):
@@ -161,7 +163,7 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     decoding = settings["decoding"]
-    prompt_audit = audit_prompt_lengths(tokenizer, tasks, decoding)
+    prompt_audit, prompt_tokens_by_task = audit_prompt_lengths(tokenizer, tasks, decoding)
     if prompt_audit["maximum_prompt_tokens_observed"] > decoding["max_prompt_tokens"]:
         write_json(paths.generations / "prompt_length_audit.json", prompt_audit)
         raise ValueError(
@@ -213,33 +215,69 @@ def main():
         model.to(device)
     model.eval()
     started = time.perf_counter()
-    batch_size = decoding["batch_size"]
-    for start in tqdm(range(0, len(pending), batch_size), desc="behavior_v1 generation"):
-        batch = pending[start : start + batch_size]
-        encoded = tokenizer(
-            [row["prompt"] for row in batch],
-            return_tensors="pt",
-            padding=True,
-            truncation=False,
-            add_special_tokens=decoding["prompt_add_special_tokens"],
+    generation_runtime = settings["generation_runtime"]
+    pending_count = len(pending)
+    if generation_runtime["length_bucketed_batching"]:
+        pending = sorted(
+            pending,
+            key=lambda row: (-prompt_tokens_by_task[str(row["task_id"])], str(row["task_id"])),
         )
-        prompt_lengths = encoded["attention_mask"].sum(dim=1).tolist()
-        if max(prompt_lengths, default=0) > decoding["max_prompt_tokens"]:
-            raise ValueError(
-                f"behavior prompt exceeds max_prompt_tokens={decoding['max_prompt_tokens']}"
+    effective_batch_size = generation_runtime["maximum_batch_size"]
+    minimum_batch_size = generation_runtime["minimum_batch_size"]
+    batch_sizes_used = []
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+    cursor = 0
+    progress = tqdm(total=len(pending), desc="behavior_v1 generation", unit="tasks")
+    while cursor < len(pending):
+        current_batch_size = min(effective_batch_size, len(pending) - cursor)
+        batch = pending[cursor : cursor + current_batch_size]
+        encoded = None
+        sequences = None
+        try:
+            encoded = tokenizer(
+                [row["prompt"] for row in batch],
+                return_tensors="pt",
+                padding=True,
+                truncation=False,
+                add_special_tokens=decoding["prompt_add_special_tokens"],
             )
-        device_for_inputs = input_device(model)
-        encoded = {key: value.to(device_for_inputs) for key, value in encoded.items()}
-        with torch.inference_mode():
-            sequences = model.generate(
-                **encoded,
-                do_sample=False,
-                num_beams=1,
-                max_new_tokens=decoding["max_new_tokens"],
-                use_cache=decoding["use_cache"],
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
+            prompt_lengths = encoded["attention_mask"].sum(dim=1).tolist()
+            if max(prompt_lengths, default=0) > decoding["max_prompt_tokens"]:
+                raise ValueError(
+                    f"behavior prompt exceeds max_prompt_tokens={decoding['max_prompt_tokens']}"
+                )
+            device_for_inputs = input_device(model)
+            encoded = {key: value.to(device_for_inputs) for key, value in encoded.items()}
+            with torch.inference_mode():
+                sequences = model.generate(
+                    **encoded,
+                    do_sample=False,
+                    num_beams=1,
+                    max_new_tokens=decoding["max_new_tokens"],
+                    use_cache=decoding["use_cache"],
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                )
+        except RuntimeError as exc:
+            is_cuda_oom = isinstance(exc, torch.OutOfMemoryError) or (
+                "out of memory" in str(exc).lower() and torch.cuda.is_available()
             )
+            if not is_cuda_oom:
+                progress.close()
+                raise
+            if not generation_runtime["oom_backoff"] or current_batch_size <= minimum_batch_size:
+                progress.close()
+                raise
+            del encoded, sequences
+            gc.collect()
+            torch.cuda.empty_cache()
+            effective_batch_size = max(minimum_batch_size, current_batch_size // 2)
+            print(
+                f"CUDA OOM at batch={current_batch_size}; retrying with "
+                f"batch={effective_batch_size}", flush=True,
+            )
+            continue
         padded_prompt_width = int(encoded["input_ids"].shape[1])
         records = []
         for task, prompt_length, sequence in zip(batch, prompt_lengths, sequences):
@@ -261,11 +299,17 @@ def main():
                 "decoding": decoding,
             })
         append_rows(output, records)
+        del encoded, sequences
+        cursor += len(batch)
+        batch_sizes_used.append(len(batch))
+        progress.update(len(batch))
+    progress.close()
 
     final_rows, final_ids = load_existing(output)
     expected_ids = {str(row["task_id"]) for row in tasks}
     if final_ids != expected_ids:
         raise ValueError(f"generation output does not cover frozen tasks: {len(final_ids)}/{len(expected_ids)}")
+    elapsed = time.perf_counter() - started
     write_manifest(paths.generations / "generation_manifest.json", {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "config_path": str(config_path),
@@ -276,7 +320,17 @@ def main():
         "generation_file_sha256": sha256_file(output),
         "rows": len(final_rows),
         "decoding": decoding,
-        "elapsed_seconds": time.perf_counter() - started,
+        "generation_runtime": generation_runtime,
+        "effective_batch_size_max": max(batch_sizes_used, default=0),
+        "effective_batch_size_min": min(batch_sizes_used, default=0),
+        "peak_gpu_memory_gib": (
+            torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
+        ),
+        "tasks_per_second": pending_count / max(elapsed, 1e-9),
+        "prompt_length_audit_sha256": sha256_file(
+            paths.generations / "prompt_length_audit.json"
+        ),
+        "elapsed_seconds": elapsed,
         "activation_intervention": False,
     })
     print(f"Saved {len(final_rows)} behavior generations to {output}")

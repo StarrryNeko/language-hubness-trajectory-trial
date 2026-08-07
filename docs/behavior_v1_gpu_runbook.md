@@ -8,6 +8,8 @@
 
 基础配置已冻结 `cpu_threads=24`、`evaluation_workers=24`、`geometry_device=cuda`、`geometry_dtype=float32` 和 `allow_tf32=false`。关闭 TF32 是为了减少不同 GPU 之间的数值漂移。
 
+在 96GB GPU 上，Mistral/Aya generation 使用长度分桶并从运行时 batch 64 开始；若 CUDA OOM，当前 batch 自动按 64→32→16→8→4→2 回退并重试，失败 batch 不写入结果。这里的运行时 batch 不属于解码语义，`do_sample=false`、prompt、任务顺序键和输出提取规则均不改变。最终 manifest 会记录实际 batch 范围、峰值显存、tasks/s 和 prompt-length audit 哈希。
+
 ## 0. 服务器准备
 
 ```bash
@@ -123,4 +125,4 @@ outputs_behavior_v1/model_comparison_three/
   behavior_cross_model_status.json
 ```
 
-显存不足时，先把对应模型配置中的 `behavior_v1.decoding.batch_size` 调低；不要修改样本 seed、排除清单、主层、任务数或统计规则。
+若自动 OOM 回退仍无法稳定运行，只调低对应配置中的 `behavior_v1.generation_runtime.maximum_batch_size`；不要修改 `decoding`、样本 seed、排除清单、主层、任务数或统计规则。

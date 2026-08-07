@@ -117,6 +117,13 @@ def behavior_settings(cfg) -> dict:
     language_names = dict(behavior.get("language_names", {}))
     if not set(["en", *languages]).issubset(language_names):
         raise ValueError("behavior_v1.language_names must cover English and every evaluation language")
+    generation_runtime = behavior.get("generation_runtime", {})
+    maximum_batch_size = int(generation_runtime.get(
+        "maximum_batch_size", decoding.get("batch_size", cfg.get("batch_size", 1))
+    ))
+    minimum_batch_size = int(generation_runtime.get("minimum_batch_size", 1))
+    if minimum_batch_size < 1 or maximum_batch_size < minimum_batch_size:
+        raise ValueError("behavior_v1 generation runtime batch sizes are invalid")
     return {
         "protocol_version": BEHAVIOR_PROTOCOL_VERSION,
         "seed": int(behavior.get("seed", cfg.get("seed", 42))),
@@ -148,6 +155,14 @@ def behavior_settings(cfg) -> dict:
         "language_id": dict(behavior.get("language_id", {})),
         "quality": dict(behavior.get("quality", {})),
         "resources": resource_settings(cfg),
+        "generation_runtime": {
+            "maximum_batch_size": maximum_batch_size,
+            "minimum_batch_size": minimum_batch_size,
+            "oom_backoff": bool(generation_runtime.get("oom_backoff", True)),
+            "length_bucketed_batching": bool(
+                generation_runtime.get("length_bucketed_batching", False)
+            ),
+        },
     }
 
 
