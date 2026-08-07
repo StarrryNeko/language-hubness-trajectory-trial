@@ -15,6 +15,6 @@
   "behavior_v1": {
     "primary_layer": 31,
     "analysis_layers": [30, 31, 32],
-    "decoding": {"batch_size": 2}
+    "decoding": {"batch_size": 2, "max_prompt_tokens": 4096}
   }
 }

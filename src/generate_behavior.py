@@ -8,9 +8,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import torch
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from behavior_common import (
     behavior_settings,
@@ -21,7 +22,7 @@ from behavior_common import (
     sha256_file,
     write_manifest,
 )
-from common import json_dumps_strict, load_config, model_metadata, set_seed
+from common import json_dumps_strict, load_config, model_metadata, set_seed, write_json
 from extract_hidden import get_dtype, model_settings
 
 
@@ -60,6 +61,44 @@ def extract_answer(text, method):
     if method == "first_nonempty_line":
         return next((line.strip() for line in raw.splitlines() if line.strip()), "")
     raise ValueError(f"unsupported behavior output_extraction: {method}")
+
+
+def audit_prompt_lengths(tokenizer, tasks, decoding, batch_size=128):
+    records = []
+    for start in range(0, len(tasks), int(batch_size)):
+        batch = tasks[start : start + int(batch_size)]
+        encoded = tokenizer(
+            [row["prompt"] for row in batch],
+            padding=False,
+            truncation=False,
+            add_special_tokens=decoding["prompt_add_special_tokens"],
+        )
+        for task, token_ids in zip(batch, encoded["input_ids"]):
+            records.append((str(task["task_id"]), len(token_ids)))
+    lengths = np.asarray([length for _, length in records], dtype=int)
+    longest_task, maximum = max(records, key=lambda value: value[1])
+    return {
+        "tasks": len(records),
+        "minimum_prompt_tokens": int(lengths.min()),
+        "median_prompt_tokens": float(np.median(lengths)),
+        "p95_prompt_tokens": float(np.quantile(lengths, 0.95)),
+        "p99_prompt_tokens": float(np.quantile(lengths, 0.99)),
+        "maximum_prompt_tokens_observed": int(maximum),
+        "longest_task_id": longest_task,
+        "configured_max_prompt_tokens": int(decoding["max_prompt_tokens"]),
+    }
+
+
+def configured_context_window(model_config, tokenizer):
+    candidates = []
+    for name in ("max_position_embeddings", "n_positions", "max_sequence_length"):
+        value = getattr(model_config, name, None)
+        if isinstance(value, int) and 0 < value < 10**7:
+            candidates.append(value)
+    tokenizer_limit = getattr(tokenizer, "model_max_length", None)
+    if isinstance(tokenizer_limit, int) and 0 < tokenizer_limit < 10**7:
+        candidates.append(tokenizer_limit)
+    return min(candidates) if candidates else None
 
 
 def main():
@@ -121,6 +160,39 @@ def main():
             raise ValueError("generation requires a tokenizer pad or EOS token")
         tokenizer.pad_token = tokenizer.eos_token
 
+    decoding = settings["decoding"]
+    prompt_audit = audit_prompt_lengths(tokenizer, tasks, decoding)
+    if prompt_audit["maximum_prompt_tokens_observed"] > decoding["max_prompt_tokens"]:
+        write_json(paths.generations / "prompt_length_audit.json", prompt_audit)
+        raise ValueError(
+            "behavior prompt exceeds configured max_prompt_tokens: "
+            f"observed={prompt_audit['maximum_prompt_tokens_observed']}, "
+            f"configured={decoding['max_prompt_tokens']}, "
+            f"task={prompt_audit['longest_task_id']}"
+        )
+    config_kwargs = {
+        "trust_remote_code": runtime["trust_remote_code"],
+        "local_files_only": runtime["local_files_only"],
+    }
+    if runtime["cache_dir"]:
+        config_kwargs["cache_dir"] = runtime["cache_dir"]
+    if runtime["revision"] and not runtime["local_files_only"]:
+        config_kwargs["revision"] = runtime["revision"]
+    model_config = AutoConfig.from_pretrained(runtime["name"], **config_kwargs)
+    context_window = configured_context_window(model_config, tokenizer)
+    prompt_audit["model_context_window"] = context_window
+    prompt_audit["max_new_tokens"] = decoding["max_new_tokens"]
+    prompt_audit["maximum_total_tokens"] = (
+        prompt_audit["maximum_prompt_tokens_observed"] + decoding["max_new_tokens"]
+    )
+    write_json(paths.generations / "prompt_length_audit.json", prompt_audit)
+    if context_window is not None and prompt_audit["maximum_total_tokens"] > context_window:
+        raise ValueError(
+            "behavior prompt plus generation budget exceeds the model context window: "
+            f"required={prompt_audit['maximum_total_tokens']}, context={context_window}, "
+            f"task={prompt_audit['longest_task_id']}"
+        )
+
     load_kwargs = {
         "dtype": get_dtype(cfg.get("dtype", "float16")),
         "trust_remote_code": runtime["trust_remote_code"],
@@ -140,7 +212,6 @@ def main():
     if device != "auto":
         model.to(device)
     model.eval()
-    decoding = settings["decoding"]
     started = time.perf_counter()
     batch_size = decoding["batch_size"]
     for start in tqdm(range(0, len(pending), batch_size), desc="behavior_v1 generation"):
