@@ -22,6 +22,8 @@ export CPU_THREADS=24
 python -m pip install -r requirements.txt
 ```
 
+正式环境固定 `NumPy 1.26.x`。当前 `fasttext-wheel` 的预测包装层与 NumPy 2.x 的 `copy=False` 语义不兼容；若环境已经安装 NumPy 2，执行 `python -m pip install --force-reinstall 'numpy==1.26.4'` 后再运行评估。
+
 包装脚本会忽略终端中可能残留的旧 `LHT_MODEL_ROOT`，默认固定读取 `/root/autodl-tmp/models`。如需在其他服务器改根目录，使用 `BEHAVIOR_MODEL_ROOT=/new/path` 覆盖。
 
 模型目录必须采用项目的 portable 名称：

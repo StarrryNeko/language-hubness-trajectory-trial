@@ -50,6 +50,11 @@ class LanguageIdentifier:
         self.label_map = dict(cfg.get("label_map", {}))
         self.model = None
         if self.backend == "fasttext":
+            if np.lib.NumpyVersion(np.__version__) >= "2.0.0":
+                raise RuntimeError(
+                    "fasttext-wheel is incompatible with NumPy 2.x copy semantics; "
+                    "install the frozen dependency with: python -m pip install 'numpy==1.26.4'"
+                )
             model_path = cfg.get("model_path")
             if not model_path or not Path(model_path).exists():
                 raise FileNotFoundError("formal fastText LID requires behavior_v1.language_id.model_path")

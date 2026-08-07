@@ -46,7 +46,7 @@ done
 echo "Model root: $LHT_MODEL_ROOT"
 echo "LID model: $LID_MODEL"
 
-"$PYTHON_BIN" -c "import torch, transformers, pandas, sklearn, statsmodels, sacrebleu, fasttext; print('CUDA', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NONE'); assert torch.cuda.is_available()"
+"$PYTHON_BIN" -c "import numpy, torch, transformers, pandas, sklearn, statsmodels, sacrebleu, fasttext; assert int(numpy.__version__.split('.')[0]) < 2, 'behavior_v1 requires NumPy<2 for fasttext-wheel compatibility'; print('NumPy', numpy.__version__); print('CUDA', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NONE'); assert torch.cuda.is_available()"
 
 case "$STAGE" in
   all|prepare|generate|analyze)
