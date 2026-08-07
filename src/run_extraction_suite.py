@@ -51,6 +51,12 @@ def validate_frozen_suite(suite, configs):
                     f"suite/config mismatch for {key}: expected={expected!r}, "
                     f"actual={actual[key]!r}, model={cfg.get('experiment_name')}"
                 )
+    exclusion_protocols = [
+        cfg.get("dataset", {}).get("sample_selection", {}).get("exclude_manifest_paths", [])
+        for cfg in configs
+    ]
+    if any(value != exclusion_protocols[0] for value in exclusion_protocols[1:]):
+        raise ValueError("all suite configs must use identical exclusion manifests")
     if suite.get("model_list_frozen_before_results") is False:
         raise ValueError("formal suite must freeze the model list before results")
 

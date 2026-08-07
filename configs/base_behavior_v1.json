@@ -1,0 +1,69 @@
+{
+  "extends": "base_24lang_same_semantics.json",
+  "device": "auto",
+  "dtype": "bfloat16",
+  "storage_dtype": "float32",
+  "dataset": {
+    "sample_size_per_language": 208,
+    "sample_selection": {
+      "strategy": "random_without_replacement",
+      "seed": 20260807,
+      "exclude_manifest_paths": [
+        "configs/behavior_exclusions_seed1_seed2.json"
+      ]
+    }
+  },
+  "behavior_v1": {
+    "enabled": true,
+    "result_directory": "behavior_v1",
+    "seed": 20260807,
+    "expected_selected_semantic_indices_sha256": "68dc00e4358d700742884a58290b0220e850a00ae098f6a30decf827f851d60c",
+    "expected_excluded_semantic_indices_sha256": "d8beca622dc6c19f176390ef8c3bdc6c23394dbe4af2e1f5f5f31f416c566988",
+    "evaluation_languages": ["zh", "ar", "hi", "es", "ru", "sw", "tr", "ja"],
+    "language_names": {
+      "en": "English",
+      "zh": "中文",
+      "ar": "العربية",
+      "hi": "हिन्दी",
+      "es": "Español",
+      "ru": "Русский",
+      "sw": "Kiswahili",
+      "tr": "Türkçe",
+      "ja": "日本語"
+    },
+    "demonstration_semantic_ids": 8,
+    "evaluation_semantic_ids": 200,
+    "prompt_template": "{demonstrations}\n\n{source_name}: {source_text}\n{target_name}:",
+    "decoding": {
+      "do_sample": false,
+      "num_beams": 1,
+      "max_new_tokens": 256,
+      "use_cache": true,
+      "batch_size": 2,
+      "prompt_add_special_tokens": true,
+      "max_prompt_tokens": 1024,
+      "output_extraction": "first_nonempty_line"
+    },
+    "local_scaling_k": 5,
+    "bootstrap_samples": 1000,
+    "confidence_level": 0.95,
+    "minimum_reference_lid_accuracy": 0.95,
+    "maximum_empty_output_rate": 0.01,
+    "resources": {
+      "cpu_threads": 24,
+      "evaluation_workers": 24,
+      "geometry_device": "cuda",
+      "geometry_dtype": "float32",
+      "allow_tf32": false
+    },
+    "language_id": {
+      "backend": "fasttext",
+      "model_path": "/root/autodl-tmp/lid/lid.176.bin",
+      "confidence_threshold": 0.70,
+      "english_span_threshold": 0.15
+    },
+    "quality": {
+      "metric": "sacrebleu_chrfpp"
+    }
+  }
+}

@@ -89,6 +89,28 @@ def select_semantic_indices(row_count, sample_size, strategy, seed):
     )
 
 
+def select_semantic_indices_excluding(row_count, sample_size, strategy, seed, excluded=None):
+    """Select a reproducible sample after removing frozen semantic indices."""
+    row_count = int(row_count)
+    sample_size = int(sample_size)
+    excluded = {int(value) for value in (excluded or [])}
+    invalid = sorted(value for value in excluded if value < 0 or value >= row_count)
+    if invalid:
+        raise ValueError(f"excluded semantic indices are outside 0..{row_count - 1}: {invalid[:5]}")
+    eligible = [value for value in range(row_count) if value not in excluded]
+    if sample_size < 1 or sample_size > len(eligible):
+        raise ValueError(
+            f"requested {sample_size} semantic IDs but only {len(eligible)} remain after exclusions"
+        )
+    if strategy == "first_n":
+        return eligible[:sample_size]
+    if strategy == "random_without_replacement":
+        return sorted(random.Random(int(seed)).sample(eligible, sample_size))
+    raise ValueError(
+        "dataset.sample_selection.strategy must be first_n or random_without_replacement"
+    )
+
+
 def classify_model_size(parameter_count_billions):
     """Classify dense models by total parameter count, not checkpoint bytes."""
     count = float(parameter_count_billions)

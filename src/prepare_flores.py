@@ -17,7 +17,7 @@ from common import (
     ensure_dirs,
     load_config,
     read_jsonl,
-    select_semantic_indices,
+    select_semantic_indices_excluding,
     set_seed,
     validate_language_inventory,
     write_jsonl,
@@ -28,6 +28,30 @@ FLORES_PLUS_CONFIG_ALIASES = {
     # FLORES-200 used zho_Hans; FLORES+ identifies Mandarin as cmn_Hans.
     "zho_Hans": "cmn_Hans",
 }
+
+
+def excluded_semantic_indices(selection_cfg, config_directory):
+    """Resolve explicit indices and frozen dataset manifests used as exclusions."""
+    excluded = {int(value) for value in selection_cfg.get("exclude_indices", [])}
+    manifests = []
+    for configured in selection_cfg.get("exclude_manifest_paths", []):
+        path = Path(configured)
+        if not path.is_absolute():
+            candidates = [Path.cwd() / path, Path(config_directory) / path]
+            path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+        if not path.exists():
+            raise FileNotFoundError(f"excluded sample manifest does not exist: {path}")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        values = payload.get("selected_semantic_indices")
+        if not isinstance(values, list):
+            raise ValueError(f"excluded sample manifest has no selected_semantic_indices list: {path}")
+        excluded.update(int(value) for value in values)
+        manifests.append({
+            "path": str(path.resolve()),
+            "selected_count": len(values),
+            "manifest_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        })
+    return sorted(excluded), manifests
 
 
 def pick_sentence(row):
@@ -147,6 +171,9 @@ def main():
             "openlanguagedata/flores_plus" if source == "flores_plus" else "facebook/flores",
         )
         cache_dir = dataset_cfg.get("cache_dir", cfg.get("huggingface_cache_dir"))
+        excluded_indices, exclusion_manifests = excluded_semantic_indices(
+            selection_cfg, Path(args.config).resolve().parent
+        )
         for short_lang, configured_flores_lang in tqdm(languages.items(), desc="Loading FLORES languages"):
             flores_lang = (
                 FLORES_PLUS_CONFIG_ALIASES.get(configured_flores_lang, configured_flores_lang)
@@ -160,8 +187,8 @@ def main():
             ds = load_dataset(dataset_name, flores_lang, **load_kwargs)
             limit = min(sample_size, len(ds))
             if selected_indices is None:
-                selected_indices = select_semantic_indices(
-                    len(ds), limit, selection_strategy, selection_seed
+                selected_indices = select_semantic_indices_excluding(
+                    len(ds), limit, selection_strategy, selection_seed, excluded_indices
                 )
             if len(selected_indices) != limit or max(selected_indices, default=-1) >= len(ds):
                 raise ValueError(
@@ -212,6 +239,17 @@ def main():
             None if source == "local_jsonl" else hashlib.sha256(
                 "\n".join(map(str, selected_indices)).encode("utf-8")
             ).hexdigest()
+        ),
+        "excluded_semantic_indices": (
+            [] if source == "local_jsonl" else excluded_indices
+        ),
+        "excluded_semantic_indices_sha256": (
+            None if source == "local_jsonl" else hashlib.sha256(
+                "\n".join(map(str, excluded_indices)).encode("utf-8")
+            ).hexdigest()
+        ),
+        "exclusion_manifests": (
+            [] if source == "local_jsonl" else exclusion_manifests
         ),
         "data_content_sha256": hashlib.sha256(
             "\n".join(

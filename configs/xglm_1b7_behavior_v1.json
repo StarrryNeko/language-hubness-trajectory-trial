@@ -1,0 +1,20 @@
+{
+  "extends": "base_behavior_v1.json",
+  "experiment_name": "xglm_1b7_behavior_v1",
+  "model": {
+    "name_or_path": "facebook/xglm-1.7B",
+    "family": "XGLM",
+    "generation": "XGLM",
+    "parameter_count_billions": 1.7,
+    "size_class": "S",
+    "training_stage": "pretraining",
+    "architecture_type": "dense",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs_behavior_v1/xglm_1b7",
+  "behavior_v1": {
+    "primary_layer": 12,
+    "analysis_layers": [11, 12, 13],
+    "decoding": {"batch_size": 4}
+  }
+}

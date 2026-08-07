@@ -78,6 +78,7 @@ def prepared_data_reusable(cfg):
     expected_strategy = dataset.get("sample_selection", {}).get("strategy")
     expected_seed = dataset.get("sample_selection", {}).get("seed")
     expected_size = dataset.get("sample_size_per_language")
+    selection = dataset.get("sample_selection", {})
     if languages is not None and set(manifest.get("languages", [])) != set(languages):
         return False
     if expected_size is not None and int(manifest.get("semantic_groups", -1)) != int(expected_size):
@@ -89,6 +90,18 @@ def prepared_data_reusable(cfg):
         if int(manifest.get("sample_selection_seed", -1)) != int(expected_seed):
             return False
     elif expected_strategy is not None and actual_strategy not in {None, expected_strategy}:
+        return False
+    configured_exclusions = {int(value) for value in selection.get("exclude_indices", [])}
+    try:
+        for configured_path in selection.get("exclude_manifest_paths", []):
+            exclusion_manifest = json.loads(Path(configured_path).read_text(encoding="utf-8"))
+            configured_exclusions.update(
+                int(value) for value in exclusion_manifest["selected_semantic_indices"]
+            )
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    recorded_exclusions = manifest.get("excluded_semantic_indices", [])
+    if configured_exclusions != {int(value) for value in (recorded_exclusions or [])}:
         return False
     return True
 
