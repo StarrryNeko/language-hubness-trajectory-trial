@@ -59,7 +59,7 @@
     "language_id": {
       "backend": "fasttext",
       "model_path": "/root/autodl-tmp/lid/lid.176.bin",
-      "confidence_threshold": 0.70,
+      "confidence_threshold": 0.50,
       "english_span_threshold": 0.15,
       "reference_gate": "top1_label_accuracy",
       "english_span_threshold_status": "frozen_before_behavior_results",
