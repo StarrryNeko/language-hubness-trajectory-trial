@@ -14,16 +14,41 @@ import torch
 from tqdm import tqdm
 from transformers import (
     AutoConfig, AutoModelForCausalLM, AutoTokenizer, LogitsProcessorList,
-    SuppressTokensLogitsProcessor,
+    StoppingCriteria, StoppingCriteriaList, SuppressTokensLogitsProcessor,
 )
 
 from behavior_association_v3.common import (
-    classify_finish, generation_path, load_tasks, paths, read_checkpoint, settings, sha256_file,
+    classify_finish, find_repetition_boundary, generation_path, load_tasks, paths,
+    read_checkpoint, settings, sha256_file,
     task_path, trim_completion, write_manifest,
 )
 from behavior_v1.generate import audit_prompt_lengths, configured_context_window, input_device
 from common import json_dumps_strict, load_config, model_metadata, set_seed
 from extract_hidden import get_dtype, model_settings
+
+
+class RepetitionBoundaryCriteria(StoppingCriteria):
+    """Stop each sequence after a frozen consecutive repeated-token suffix."""
+
+    def __init__(self, prompt_width, minimum_tokens, maximum_block_tokens):
+        self.prompt_width = int(prompt_width)
+        self.minimum_tokens = int(minimum_tokens)
+        self.maximum_block_tokens = int(maximum_block_tokens)
+
+    def __call__(self, input_ids, scores, **kwargs):
+        generated = input_ids[:, self.prompt_width:]
+        decisions = torch.zeros(len(input_ids), dtype=torch.bool, device=input_ids.device)
+        if generated.shape[1] < self.minimum_tokens:
+            return decisions
+        maximum = min(self.maximum_block_tokens, generated.shape[1] // 3)
+        for block_size in range(1, maximum + 1):
+            repeats = 8 if block_size == 1 else 5 if block_size == 2 else 4 if block_size == 3 else 3
+            width = block_size * repeats
+            if generated.shape[1] < width:
+                continue
+            segments = generated[:, -width:].reshape(len(input_ids), repeats, block_size)
+            decisions |= (segments == segments[:, -1:, :]).all(dim=2).all(dim=1)
+        return decisions
 
 
 def read_existing(path):
@@ -172,6 +197,11 @@ def main():
             )
             prompt_counts = encoded["attention_mask"].sum(dim=1).tolist()
             encoded = {key: value.to(input_device(model)) for key, value in encoded.items()}
+            padded_width = int(encoded["input_ids"].shape[1])
+            repetition_criteria = RepetitionBoundaryCriteria(
+                padded_width, protocol["repetition"]["minimum_tokens"],
+                protocol["repetition"]["maximum_block_tokens"],
+            )
             with torch.inference_mode():
                 sequences = model.generate(
                     **encoded, tokenizer=tokenizer,
@@ -181,6 +211,7 @@ def main():
                     max_new_tokens=protocol["decoding"]["max_new_tokens"],
                     use_cache=protocol["decoding"]["use_cache"],
                     stop_strings=protocol["decoding"]["stop_strings"],
+                    stopping_criteria=StoppingCriteriaList([repetition_criteria]),
                     logits_processor=processors,
                     pad_token_id=tokenizer.pad_token_id,
                 )
@@ -195,19 +226,27 @@ def main():
             oom_events += 1
             batch_size = max(minimum_batch, current // 2)
             continue
-        padded_width = int(encoded["input_ids"].shape[1])
         records = []
         for task, prompt_count, sequence in zip(batch, prompt_counts, sequences):
             token_ids = sequence[padded_width:].detach().cpu().tolist()
             eos_position = next((i for i, value in enumerate(token_ids) if value in eos_ids), None)
             content_ids = token_ids[:eos_position] if eos_position is not None else token_ids
-            forbidden = sorted(set(content_ids) & all_special_ids)
+            repetition_position = find_repetition_boundary(
+                content_ids, protocol["repetition"]["minimum_tokens"],
+                protocol["repetition"]["maximum_block_tokens"],
+            )
+            effective_ids = (
+                content_ids[:repetition_position]
+                if repetition_position is not None else content_ids
+            )
+            forbidden = sorted(set(effective_ids) & all_special_ids)
             if forbidden:
                 raise ValueError(f"V3 generated forbidden special token IDs: {forbidden}")
-            decoded = tokenizer.decode(content_ids, skip_special_tokens=True)
+            decoded = tokenizer.decode(effective_ids, skip_special_tokens=True)
             text, boundary, marker = trim_completion(decoded, protocol["decoding"]["stop_strings"])
             finish = classify_finish(
-                eos_position, boundary, len(token_ids), protocol["decoding"]["max_new_tokens"]
+                eos_position, boundary, repetition_position, len(token_ids),
+                protocol["decoding"]["max_new_tokens"],
             )
             observed_eos_id = None if eos_position is None else int(token_ids[eos_position])
             records.append({
@@ -215,12 +254,16 @@ def main():
                 "checkpoint_sha256": checkpoint["checkpoint_sha256"],
                 "generated_text": text,
                 "prompt_token_count": int(prompt_count),
-                "generated_token_count": len(content_ids),
+                "generated_token_count": len(effective_ids),
+                "raw_generated_token_count": len(token_ids),
                 "finish_reason": finish,
                 "text_boundary": marker,
                 "termination_token_id": observed_eos_id if finish == "native_eos" else None,
                 "termination_position": int(eos_position) if finish == "native_eos" else None,
                 "observed_eos_token_id": observed_eos_id,
+                "repetition_boundary_position": (
+                    int(repetition_position) if finish == "repetition_boundary" else None
+                ),
                 "decoding": protocol["decoding"],
                 "activation_intervention": False,
             })
@@ -239,7 +282,10 @@ def main():
     if ids != set(task_map):
         raise ValueError("V3 generation does not exactly cover its frozen task split")
     elapsed = time.perf_counter() - started
-    counts = {name: sum(row["finish_reason"] == name for row in rows) for name in ("native_eos", "text_boundary", "token_ceiling")}
+    counts = {
+        name: sum(row["finish_reason"] == name for row in rows)
+        for name in ("native_eos", "text_boundary", "repetition_boundary", "token_ceiling")
+    }
     write_manifest(paths(cfg).generations / f"{args.split}_generation_manifest.json", {
         "config_path": str(config_path), "split": args.split,
         "model": runtime["model_id"], "model_metadata": model_metadata(cfg, require=True),
@@ -250,6 +296,8 @@ def main():
         "native_eos_token_ids": sorted(eos_ids),
         "forced_eos_token_id_disabled": True,
         "token_ceiling_rate": counts["token_ceiling"] / len(rows),
+        "repetition_boundary_rate": counts["repetition_boundary"] / len(rows),
+        "repetition_boundary_protocol": protocol["repetition"],
         "batch_size_min": min(used_batches), "batch_size_max": max(used_batches),
         "peak_gpu_reserved_gib": max(peak_values), "cuda_oom_events": oom_events,
         "allocator_fraction": allocator_fraction, "elapsed_seconds": elapsed,

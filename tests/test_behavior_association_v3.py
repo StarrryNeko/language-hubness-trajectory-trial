@@ -6,7 +6,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from behavior_association_v3.common import classify_finish, settings, trim_completion
+from behavior_association_v3.common import (
+    classify_finish, find_repetition_boundary, settings, trim_completion,
+)
 from behavior_association_v3.prepare_tasks import build
 from common import load_config
 from structure_v2.geometry import bootstrap_interval
@@ -46,17 +48,37 @@ class BehaviorAssociationV3Tests(unittest.TestCase):
         self.assertIsNone(marker)
 
     def test_finish_reason_uses_the_earliest_real_boundary(self):
-        self.assertEqual(classify_finish(12, True, 13, 192), "text_boundary")
-        self.assertEqual(classify_finish(12, False, 13, 192), "native_eos")
-        self.assertEqual(classify_finish(None, False, 192, 192), "token_ceiling")
+        self.assertEqual(classify_finish(12, True, 8, 13, 192), "text_boundary")
+        self.assertEqual(classify_finish(12, False, 8, 13, 192), "repetition_boundary")
+        self.assertEqual(classify_finish(12, False, None, 13, 192), "native_eos")
+        self.assertEqual(classify_finish(None, False, None, 192, 192), "token_ceiling")
         with self.assertRaisesRegex(ValueError, "recognized V3 boundary"):
-            classify_finish(None, False, 18, 192)
+            classify_finish(None, False, None, 18, 192)
+
+    def test_same_line_language_label_is_a_text_boundary(self):
+        text, stopped, marker = trim_completion(
+            "पहला उत्तर Chinese: continued demonstration", [" Chinese:"]
+        )
+        self.assertEqual(text, "पहला उत्तर")
+        self.assertTrue(stopped)
+        self.assertEqual(marker, " Chinese:")
+
+    def test_repeated_token_blocks_are_trimmed_at_copy_two(self):
+        prefix = list(range(20))
+        block = [91, 92, 93, 94]
+        values = prefix + block * 3
+        boundary = find_repetition_boundary(values, minimum_tokens=24, maximum_block_tokens=8)
+        self.assertEqual(boundary, len(prefix) + len(block))
+        self.assertEqual(values[:boundary], prefix + block)
+        self.assertIsNone(find_repetition_boundary(prefix + block * 2, 24, 8))
 
     def test_dynamic_batch_and_target_inventory_are_frozen(self):
         protocol = settings(self.config())
         self.assertEqual(protocol["target_languages"], ["zh", "ar", "hi", "ru", "ja"])
         self.assertIn("\n\n", protocol["decoding"]["stop_strings"])
         self.assertIn("\nEnglish:", protocol["decoding"]["stop_strings"])
+        self.assertIn(" Chinese:", protocol["decoding"]["stop_strings"])
+        self.assertEqual(protocol["target_language_gate"]["backend"], "fasttext")
         self.assertLessEqual(protocol["runtime"]["initial_batch_size"], protocol["runtime"]["maximum_batch_size"])
         self.assertEqual(protocol["counts"], {"demonstration": 4, "calibration": 80, "formal": 720})
 

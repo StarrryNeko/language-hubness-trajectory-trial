@@ -34,7 +34,9 @@
       "use_cache": true,
       "stop_strings": [
         "\n\n", "\nEnglish:", "\nChinese:", "\nArabic:", "\nHindi:",
-        "\nSpanish:", "\nRussian:", "\nSwahili:", "\nTurkish:", "\nJapanese:"
+        "\nSpanish:", "\nRussian:", "\nSwahili:", "\nTurkish:", "\nJapanese:",
+        " English:", " Chinese:", " Arabic:", " Hindi:", " Spanish:",
+        " Russian:", " Swahili:", " Turkish:", " Japanese:"
       ],
       "prompt_add_special_tokens": false
     },
@@ -50,7 +52,20 @@
     "maximum_empty_output_rate": 0.01,
     "maximum_token_ceiling_rate": 0.01,
     "maximum_mean_repetition_4gram_fraction": 0.02,
+    "maximum_repetition_boundary_rate": 0.20,
     "minimum_primary_events": 30,
+    "repetition_boundary": {
+      "minimum_tokens": 24,
+      "maximum_block_tokens": 32
+    },
+    "target_language_gate": {
+      "backend": "fasttext",
+      "model_path": "/root/autodl-tmp/lid/lid.176.bin",
+      "confidence_threshold": 0.0,
+      "minimum_reference_top1_accuracy": 0.95,
+      "minimum_output_target_retention": 0.50,
+      "minimum_per_target_retention": 0.30
+    },
     "lexical_leakage": {
       "minimum_latin_run_words": 3,
       "audit_negative_per_language": 40,

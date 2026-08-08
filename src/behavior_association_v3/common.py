@@ -72,7 +72,33 @@ def trim_completion(text, stop_strings):
     return text.strip(), False, None
 
 
-def classify_finish(eos_position, has_text_boundary, generated_count, maximum):
+def find_repetition_boundary(
+    token_ids, minimum_tokens=24, maximum_block_tokens=32,
+):
+    """Return the second-copy boundary for a degenerate repeated suffix.
+
+    Short blocks require more consecutive repetitions to avoid truncating normal
+    emphasis; blocks of four or more tokens require three copies. The retained
+    answer includes the first copy and removes repetition beginning at copy two.
+    """
+    values = list(map(int, token_ids))
+    if len(values) < int(minimum_tokens):
+        return None
+    maximum = min(int(maximum_block_tokens), len(values) // 3)
+    for block_size in range(1, maximum + 1):
+        repeats = 8 if block_size == 1 else 5 if block_size == 2 else 4 if block_size == 3 else 3
+        width = block_size * repeats
+        if len(values) < width:
+            continue
+        block = values[-block_size:]
+        if values[-width:] == block * repeats:
+            return len(values) - block_size * (repeats - 1)
+    return None
+
+
+def classify_finish(
+    eos_position, has_text_boundary, repetition_position, generated_count, maximum,
+):
     """Classify the earliest recognized completion boundary.
 
     Text is inspected only before the first EOS, so a detected text boundary is
@@ -80,6 +106,8 @@ def classify_finish(eos_position, has_text_boundary, generated_count, maximum):
     """
     if has_text_boundary:
         return "text_boundary"
+    if repetition_position is not None:
+        return "repetition_boundary"
     if eos_position is not None:
         return "native_eos"
     if int(generated_count) >= int(maximum):
@@ -122,6 +150,8 @@ def settings(cfg):
     if not 1 <= minimum <= initial <= maximum:
         raise ValueError("invalid V3 adaptive batch range")
     lexical = raw.get("lexical_leakage", {})
+    repetition = raw.get("repetition_boundary", {})
+    target_gate = raw.get("target_language_gate", {})
     return {
         "seed": int(raw.get("seed", 20260810)),
         "role_seed": int(raw.get("role_assignment_seed", 20260810)),
@@ -154,11 +184,16 @@ def settings(cfg):
             "maximum_gpu_memory_gib": float(runtime.get("maximum_gpu_memory_gib", 91.0)),
             "target_gpu_memory_fraction": float(runtime.get("target_gpu_memory_fraction", 0.94)),
         },
+        "repetition": {
+            "minimum_tokens": int(repetition.get("minimum_tokens", 24)),
+            "maximum_block_tokens": int(repetition.get("maximum_block_tokens", 32)),
+        },
         "gates": {
             "maximum_empty_output_rate": float(raw.get("maximum_empty_output_rate", 0.01)),
             "maximum_token_ceiling_rate": float(raw.get("maximum_token_ceiling_rate", 0.01)),
             "maximum_mean_repetition_4gram_fraction": float(raw.get("maximum_mean_repetition_4gram_fraction", 0.02)),
             "minimum_primary_events": int(raw.get("minimum_primary_events", 30)),
+            "maximum_repetition_boundary_rate": float(raw.get("maximum_repetition_boundary_rate", 0.20)),
         },
         "lexical": {
             "rule_version": LEXICAL_DETECTOR_RULE,
@@ -169,6 +204,17 @@ def settings(cfg):
             "maximum_false_positive_rate": float(lexical.get("maximum_false_positive_rate", 0.02)),
         },
         "cpu_threads": int(raw.get("cpu_threads", 24)),
+        "target_language_gate": {
+            "backend": str(target_gate.get("backend", "fasttext")),
+            "model_path": str(os.environ.get(
+                "BEHAVIOR_LID_MODEL",
+                target_gate.get("model_path", "/root/autodl-tmp/lid/lid.176.bin"),
+            )),
+            "confidence_threshold": float(target_gate.get("confidence_threshold", 0.0)),
+            "minimum_reference_top1_accuracy": float(target_gate.get("minimum_reference_top1_accuracy", 0.95)),
+            "minimum_output_target_retention": float(target_gate.get("minimum_output_target_retention", 0.50)),
+            "minimum_per_target_retention": float(target_gate.get("minimum_per_target_retention", 0.30)),
+        },
     }
 
 

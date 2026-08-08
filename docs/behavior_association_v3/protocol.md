@@ -30,6 +30,11 @@ english_target_competition
 `text_boundary`（单个前导换行不会产生空答案）；`max_new_tokens=192` 只是失控保护，达到它记录为
 `token_ceiling`。输出不补齐到固定长度。
 
+语言标签边界同时覆盖换行和同一行空格前缀，例如 `\nChinese:` 与 ` Chinese:`。生成器还会检测冻结的
+连续 token-block 重复：单 token 需连续8次、双 token 需5次、三 token 需4次、四个及以上 token
+需3份连续副本。检测到后逐序列停止，只保留第一份内容并记录 `repetition_boundary`；它不是原生 EOS，
+也不会通过 `no_repeat_ngram_size` 强迫模型改写后续 token。
+
 EOS 同时从 tokenizer、model config 和 generation config 收集并显式传给生成器。框架的
 `forced_eos_token_id` 被关闭，因此安全上限处由框架追加的 EOS 不会伪装成 `native_eos`。每条记录保存
 实际 EOS token ID 和位置，manifest 保存完整 EOS ID 集合及三类结束原因计数。
@@ -38,7 +43,9 @@ EOS 同时从 tokenizer、model config 和 generation config 收集并显式传�
 的进程上限为91 GiB，目标利用率为94%，每次实际 batch、OOM 和峰值显存均写入 manifest。
 
 正式分析门禁：空输出率不超过1%、token-ceiling rate 不超过1%、平均4-gram重复率不超过2%、
-SacreBLEU chrF++ 可用、校准集检测器达到 precision/recall/FPR 门槛。
+repetition-boundary rate 不超过20%、SacreBLEU chrF++ 可用、校准集检测器达到 precision/recall/FPR
+门槛。fastText 还必须在参考译文上达到至少95%的目标语言 top-1 准确率；模型输出整体目标语言保持率
+至少50%，每个目标语至少30%。语言保持是任务有效性门禁，不是用于挑选或删除失败样本的后处理。
 
 ## 单模型顺序
 
