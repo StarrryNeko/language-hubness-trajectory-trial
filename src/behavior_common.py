@@ -128,7 +128,10 @@ def behavior_settings(cfg) -> dict:
         "initial_batch_size", maximum_batch_size
     ))
     target_gpu_memory_fraction = float(generation_runtime.get(
-        "target_gpu_memory_fraction", 0.88
+        "target_gpu_memory_fraction", 0.76
+    ))
+    target_gpu_memory_gib = float(generation_runtime.get(
+        "target_gpu_memory_gib", 72.0
     ))
     maximum_batch_growth_factor = float(generation_runtime.get(
         "maximum_batch_growth_factor", 2.0
@@ -142,6 +145,8 @@ def behavior_settings(cfg) -> dict:
         raise ValueError("behavior_v1 generation runtime batch sizes are invalid")
     if not 0.0 < target_gpu_memory_fraction < 1.0:
         raise ValueError("target_gpu_memory_fraction must lie strictly between 0 and 1")
+    if target_gpu_memory_gib <= 0.0:
+        raise ValueError("target_gpu_memory_gib must be positive")
     if maximum_batch_growth_factor <= 1.0:
         raise ValueError("maximum_batch_growth_factor must exceed 1")
     if not 0.0 < oom_backoff_factor < 1.0:
@@ -208,6 +213,7 @@ def behavior_settings(cfg) -> dict:
                 generation_runtime.get("adaptive_batch_sizing", True)
             ),
             "target_gpu_memory_fraction": target_gpu_memory_fraction,
+            "target_gpu_memory_gib": target_gpu_memory_gib,
             "maximum_batch_growth_factor": maximum_batch_growth_factor,
             "length_bucketed_batching": bool(
                 generation_runtime.get("length_bucketed_batching", False)

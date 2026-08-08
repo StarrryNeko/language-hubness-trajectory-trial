@@ -51,7 +51,8 @@
       "oom_backoff": true,
       "oom_backoff_factor": 0.75,
       "adaptive_batch_sizing": true,
-      "target_gpu_memory_fraction": 0.88,
+      "target_gpu_memory_fraction": 0.76,
+      "target_gpu_memory_gib": 72.0,
       "maximum_batch_growth_factor": 2.0,
       "length_bucketed_batching": true
     },
