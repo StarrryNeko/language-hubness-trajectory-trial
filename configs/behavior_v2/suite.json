@@ -1,0 +1,16 @@
+{
+  "configs": ["xglm_1b7.json", "mistral_7b_v01.json", "aya_23_8b.json"],
+  "comparison_output_dir": "outputs_behavior_v2/model_comparison_three",
+  "sample_selection_strategy": "random_without_replacement",
+  "sample_selection_seed": 20260809,
+  "sample_size_per_language": 804,
+  "model_list_frozen_before_results": true,
+  "confirmatory_positive_models": [
+    "xglm_1b7_behavior_v2",
+    "aya_23_8b_behavior_v2"
+  ],
+  "negative_control_models": ["mistral_7b_v01_behavior_v2"],
+  "selection_rule": "same frozen model roles as behavior_v1",
+  "representation": "mean_pool",
+  "activation_intervention": false
+}

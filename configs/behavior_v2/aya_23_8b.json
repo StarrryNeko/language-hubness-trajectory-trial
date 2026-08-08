@@ -1,0 +1,22 @@
+{
+  "extends": "base.json",
+  "experiment_name": "aya_23_8b_behavior_v2",
+  "model": {
+    "name_or_path": "CohereLabs/aya-23-8B",
+    "model_root": "/root/autodl-tmp/models",
+    "family": "Aya",
+    "generation": "Aya-23",
+    "parameter_count_billions": 8.03,
+    "size_class": "M",
+    "training_stage": "instruction_tuning",
+    "architecture_type": "dense",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs_behavior_v2/aya_23_8b",
+  "behavior_v2": {
+    "primary_layer": 31,
+    "analysis_layers": [30, 31, 32],
+    "decoding": {"max_prompt_tokens": 4096},
+    "generation_runtime": {"batch_size": 48, "minimum_batch_size": 2}
+  }
+}

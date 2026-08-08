@@ -1,0 +1,11 @@
+{
+  "configs": ["xglm_1b7.json"],
+  "comparison_output_dir": "outputs_behavior_v2/model_comparison_three",
+  "sample_selection_strategy": "random_without_replacement",
+  "sample_selection_seed": 20260809,
+  "sample_size_per_language": 804,
+  "model_list_frozen_before_results": true,
+  "pilot_scope": "single-model protocol and measurement validation before the frozen three-model suite",
+  "representation": "mean_pool",
+  "activation_intervention": false
+}

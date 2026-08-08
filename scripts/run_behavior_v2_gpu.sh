@@ -17,19 +17,18 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 export LHT_MODEL_ROOT="${BEHAVIOR_MODEL_ROOT:-/root/autodl-tmp/models}"
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
-SUITE="${BEHAVIOR_SUITE:-configs/behavior_v1/suite.json}"
-LID_MODEL="/root/autodl-tmp/lid/lid.176.bin"
+SUITE="${BEHAVIOR_V2_SUITE:-configs/behavior_v2/suite.json}"
 STAGE="${1:-all}"
 
 if [[ "${INSTALL_DEPS:-0}" == "1" ]]; then
   "$PYTHON_BIN" -m pip install -r requirements.txt
 fi
 
-if [[ ! -f "$LID_MODEL" ]]; then
-  echo "Missing fastText LID model: $LID_MODEL" >&2
-  exit 2
+REQUIRE_CUDA=1
+if [[ "$STAGE" == "audit" || "$STAGE" == "analyze" ]]; then
+  REQUIRE_CUDA=0
 fi
-if [[ "$STAGE" != "analyze" ]]; then
+if [[ "$REQUIRE_CUDA" == "1" ]]; then
   if [[ ! -d "$LHT_MODEL_ROOT" ]]; then
     echo "Missing portable model root: $LHT_MODEL_ROOT" >&2
     exit 2
@@ -47,23 +46,17 @@ if [[ "$STAGE" != "analyze" ]]; then
 fi
 
 echo "Model root: $LHT_MODEL_ROOT"
-echo "LID model: $LID_MODEL"
-
-REQUIRE_CUDA=1
-if [[ "$STAGE" == "analyze" ]]; then
-  REQUIRE_CUDA=0
-fi
-"$PYTHON_BIN" -c "import numpy, torch, transformers, pandas, sklearn, statsmodels, sacrebleu, fasttext; assert int(numpy.__version__.split('.')[0]) < 2, 'behavior_v1 requires NumPy<2 for fasttext-wheel compatibility'; require_cuda=bool(int('$REQUIRE_CUDA')); available=torch.cuda.is_available(); print('NumPy', numpy.__version__); print('CUDA', available, torch.cuda.get_device_name(0) if available else 'NONE'); assert available or not require_cuda, 'this stage requires CUDA'"
+"$PYTHON_BIN" -c "import numpy, torch, transformers, pandas, sklearn, statsmodels, sacrebleu; assert int(numpy.__version__.split('.')[0]) < 2, 'requirements require NumPy<2'; require_cuda=bool(int('$REQUIRE_CUDA')); available=torch.cuda.is_available(); print('NumPy', numpy.__version__); print('CUDA', available, torch.cuda.get_device_name(0) if available else 'NONE'); assert available or not require_cuda, 'this stage requires CUDA'"
 
 case "$STAGE" in
-  all|prepare|generate|analyze)
-    "$PYTHON_BIN" src/run_behavior_suite.py \
+  all|prepare|generate|audit|analyze)
+    "$PYTHON_BIN" src/run_behavior_v2_suite.py \
       --suite "$SUITE" \
       --stage "$STAGE" \
       --resume
     ;;
   *)
-    echo "Usage: bash scripts/run_behavior_v1_gpu.sh [all|prepare|generate|analyze]" >&2
+    echo "Usage: bash scripts/run_behavior_v2_gpu.sh [all|prepare|generate|audit|analyze]" >&2
     exit 2
     ;;
 esac

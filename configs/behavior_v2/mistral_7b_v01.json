@@ -1,0 +1,22 @@
+{
+  "extends": "base.json",
+  "experiment_name": "mistral_7b_v01_behavior_v2",
+  "model": {
+    "name_or_path": "mistralai/Mistral-7B-v0.1",
+    "model_root": "/root/autodl-tmp/models",
+    "family": "Mistral",
+    "generation": "Mistral-v0.1",
+    "parameter_count_billions": 7.24,
+    "size_class": "M",
+    "training_stage": "pretraining",
+    "architecture_type": "dense",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs_behavior_v2/mistral_7b_v01",
+  "behavior_v2": {
+    "primary_layer": 30,
+    "analysis_layers": [29, 30, 31],
+    "decoding": {"max_prompt_tokens": 4096},
+    "generation_runtime": {"batch_size": 64, "minimum_batch_size": 4}
+  }
+}
