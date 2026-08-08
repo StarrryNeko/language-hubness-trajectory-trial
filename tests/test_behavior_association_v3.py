@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from behavior_association_v3.common import (
     classify_finish, find_repetition_boundary, settings, trim_completion,
+    strip_framework_padding,
 )
 from behavior_association_v3.prepare_tasks import build
 from common import load_config
@@ -71,6 +72,14 @@ class BehaviorAssociationV3Tests(unittest.TestCase):
         self.assertEqual(boundary, len(prefix) + len(block))
         self.assertEqual(values[:boundary], prefix + block)
         self.assertIsNone(find_repetition_boundary(prefix + block * 2, 24, 8))
+
+    def test_framework_padding_is_not_a_generated_special_token(self):
+        values, removed = strip_framework_padding([41, 42, 2, 1, 1], 1, {2})
+        self.assertEqual(values, [41, 42, 2])
+        self.assertEqual(removed, 2)
+        values, removed = strip_framework_padding([41, 42, 2], 2, {2})
+        self.assertEqual(values, [41, 42, 2])
+        self.assertEqual(removed, 0)
 
     def test_dynamic_batch_and_target_inventory_are_frozen(self):
         protocol = settings(self.config())

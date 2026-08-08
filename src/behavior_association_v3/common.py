@@ -96,6 +96,23 @@ def find_repetition_boundary(
     return None
 
 
+def strip_framework_padding(token_ids, pad_token_id, eos_ids):
+    """Remove only right-side batch padding added after per-row completion.
+
+    The model is forbidden from sampling PAD, so a trailing PAD distinct from EOS
+    can only be framework alignment. When PAD and EOS share an ID, EOS must win
+    and nothing is stripped here.
+    """
+    values = list(map(int, token_ids))
+    if pad_token_id is None or int(pad_token_id) in set(map(int, eos_ids)):
+        return values, 0
+    pad = int(pad_token_id)
+    end = len(values)
+    while end > 0 and values[end - 1] == pad:
+        end -= 1
+    return values[:end], len(values) - end
+
+
 def classify_finish(
     eos_position, has_text_boundary, repetition_position, generated_count, maximum,
 ):

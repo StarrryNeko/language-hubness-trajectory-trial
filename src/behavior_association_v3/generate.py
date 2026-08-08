@@ -19,7 +19,7 @@ from transformers import (
 
 from behavior_association_v3.common import (
     classify_finish, find_repetition_boundary, generation_path, load_tasks, paths,
-    read_checkpoint, settings, sha256_file,
+    read_checkpoint, settings, sha256_file, strip_framework_padding,
     task_path, trim_completion, write_manifest,
 )
 from behavior_v1.generate import audit_prompt_lengths, configured_context_window, input_device
@@ -173,6 +173,12 @@ def main():
     generation_config.eos_token_id = sorted(eos_ids)
     generation_config.min_length = 0
     generation_config.min_new_tokens = None
+    generation_config.do_sample = False
+    generation_config.num_beams = 1
+    generation_config.max_new_tokens = protocol["decoding"]["max_new_tokens"]
+    generation_config.use_cache = protocol["decoding"]["use_cache"]
+    generation_config.stop_strings = protocol["decoding"]["stop_strings"]
+    generation_config.pad_token_id = tokenizer.pad_token_id
     all_special_ids = set(map(int, tokenizer.all_special_ids))
     suppressed_ids = sorted(all_special_ids - eos_ids)
     processors = LogitsProcessorList([SuppressTokensLogitsProcessor(suppressed_ids)])
@@ -182,6 +188,7 @@ def main():
     minimum_batch = protocol["runtime"]["minimum_batch_size"]
     target_reserved = total_gib * protocol["runtime"]["target_gpu_memory_fraction"]
     cursor, oom_events = 0, 0
+    framework_padding_tokens_removed = 0
     used_batches, peak_values = [], []
     started = time.perf_counter()
     progress = tqdm(total=len(pending), desc=f"V3 {args.split}", unit="tasks")
@@ -206,14 +213,8 @@ def main():
                 sequences = model.generate(
                     **encoded, tokenizer=tokenizer,
                     generation_config=generation_config,
-                    do_sample=False, num_beams=1,
-                    eos_token_id=sorted(eos_ids),
-                    max_new_tokens=protocol["decoding"]["max_new_tokens"],
-                    use_cache=protocol["decoding"]["use_cache"],
-                    stop_strings=protocol["decoding"]["stop_strings"],
                     stopping_criteria=StoppingCriteriaList([repetition_criteria]),
                     logits_processor=processors,
-                    pad_token_id=tokenizer.pad_token_id,
                 )
         except RuntimeError as exc:
             is_oom = isinstance(exc, torch.OutOfMemoryError) or "out of memory" in str(exc).lower()
@@ -228,7 +229,11 @@ def main():
             continue
         records = []
         for task, prompt_count, sequence in zip(batch, prompt_counts, sequences):
-            token_ids = sequence[padded_width:].detach().cpu().tolist()
+            returned_token_ids = sequence[padded_width:].detach().cpu().tolist()
+            token_ids, padding_removed = strip_framework_padding(
+                returned_token_ids, tokenizer.pad_token_id, eos_ids
+            )
+            framework_padding_tokens_removed += padding_removed
             eos_position = next((i for i, value in enumerate(token_ids) if value in eos_ids), None)
             content_ids = token_ids[:eos_position] if eos_position is not None else token_ids
             repetition_position = find_repetition_boundary(
@@ -256,6 +261,8 @@ def main():
                 "prompt_token_count": int(prompt_count),
                 "generated_token_count": len(effective_ids),
                 "raw_generated_token_count": len(token_ids),
+                "returned_generated_token_count": len(returned_token_ids),
+                "framework_padding_tokens_removed": padding_removed,
                 "finish_reason": finish,
                 "text_boundary": marker,
                 "termination_token_id": observed_eos_id if finish == "native_eos" else None,
@@ -305,6 +312,7 @@ def main():
         "decoding": protocol["decoding"], "activation_intervention": False,
         "suppressed_special_token_ids": suppressed_ids,
         "generated_forbidden_special_token_count": 0,
+        "framework_padding_tokens_removed": framework_padding_tokens_removed,
         "prompt_special_tokens_added": False,
     })
     print(f"V3 {args.split} generation complete: {counts}")
