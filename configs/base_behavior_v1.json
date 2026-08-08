@@ -40,7 +40,7 @@
       "max_new_tokens": 256,
       "use_cache": true,
       "batch_size": 2,
-      "prompt_add_special_tokens": true,
+      "prompt_add_special_tokens": false,
       "max_prompt_tokens": 1024,
       "output_extraction": "first_nonempty_line"
     },

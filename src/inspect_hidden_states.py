@@ -22,7 +22,6 @@ def main():
     parser.add_argument("--rows", default=None, help="Comma-separated metadata row indices; default samples each language.")
     parser.add_argument("--languages", default=None, help="Optional comma-separated language filter.")
     parser.add_argument("--layers", default=None, help="Comma-separated layers; default first, middle, and final.")
-    parser.add_argument("--representations", default=None, help="Comma-separated representation names.")
     parser.add_argument("--per-language", type=int, default=2)
     parser.add_argument("--vector-head", type=int, default=6)
     parser.add_argument("--show-token-sequence", action="store_true")
@@ -52,21 +51,10 @@ def main():
     if selected.empty:
         raise ValueError("No metadata rows matched the requested filters")
 
-    file_map = representation_file_map()
-    requested_representations = (
-        [item.strip() for item in args.representations.split(",") if item.strip()]
-        if args.representations
-        else cfg.get("metrics", {}).get("representations", ["mean_pool"])
-    )
-    arrays = {}
-    for name in requested_representations:
-        if name not in file_map:
-            raise ValueError(f"Unknown representation: {name}")
-        path = hidden_dir / file_map[name]
-        if path.exists():
-            arrays[name] = np.load(path, mmap_mode="r")
-    if not arrays:
-        raise FileNotFoundError("None of the requested representation files exists")
+    path = hidden_dir / representation_file_map()["mean_pool"]
+    if not path.exists():
+        raise FileNotFoundError(f"Mean-pool representation is missing: {path}")
+    arrays = {"mean_pool": np.load(path, mmap_mode="r")}
 
     n_layers = next(iter(arrays.values())).shape[1]
     layers = parse_int_list(args.layers)

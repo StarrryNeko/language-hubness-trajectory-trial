@@ -105,6 +105,8 @@ def behavior_settings(cfg) -> dict:
         raise ValueError("behavior_v1 main decoding must use do_sample=false")
     if int(decoding.get("num_beams", 1)) != 1:
         raise ValueError("behavior_v1 main decoding must use num_beams=1")
+    if bool(decoding.get("prompt_add_special_tokens", False)):
+        raise ValueError("behavior_v1 prompt encoding must not add tokenizer special tokens")
     output_extraction = str(decoding.get("output_extraction", "first_nonempty_line"))
     if output_extraction not in {"first_nonempty_line", "full_generation"}:
         raise ValueError("behavior_v1 decoding.output_extraction is unsupported")
@@ -141,7 +143,7 @@ def behavior_settings(cfg) -> dict:
             "max_new_tokens": int(decoding.get("max_new_tokens", 256)),
             "use_cache": bool(decoding.get("use_cache", True)),
             "batch_size": int(decoding.get("batch_size", cfg.get("batch_size", 1))),
-            "prompt_add_special_tokens": bool(decoding.get("prompt_add_special_tokens", True)),
+            "prompt_add_special_tokens": False,
             "max_prompt_tokens": int(decoding.get("max_prompt_tokens", 1024)),
             "output_extraction": output_extraction,
         },

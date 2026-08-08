@@ -6,7 +6,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from common import MODEL_SIZE_CLASSES, load_config, model_metadata
+from common import (
+    MODEL_SIZE_CLASSES,
+    REPRESENTATION_PROTOCOL_VERSION,
+    load_config,
+    model_metadata,
+)
 from evidence_rules import (
     REQUIRED_EVIDENCE_METRICS,
     max_consecutive_layers,
@@ -89,12 +94,10 @@ def load_model_result(config_path):
         raise ValueError(f"result JSON cannot be parsed: {error}") from error
     cross_model_evidence = classify_cross_model(validation)
     try:
-        if extraction.get("protocol_version") != "mean_pool_no_eos_v1":
+        if extraction.get("protocol_version") != REPRESENTATION_PROTOCOL_VERSION:
             raise ValueError("extraction manifest is not from the active protocol")
         if extraction.get("representations") != ["mean_pool"]:
             raise ValueError("extraction manifest is not mean-pool-only")
-        if extraction.get("appended_eos") is not False:
-            raise ValueError("extraction manifest does not confirm appended_eos=False")
         layer_count = int(extraction["layers"])
         if layer_count < 1:
             raise ValueError("layer count must be positive")
@@ -341,7 +344,7 @@ def compare_suite(suite_path):
         "family_statuses": family_statuses,
         "replication_status": "REPLICATED" if len(robust_models) >= 2 else "NOT_REPLICATED",
         "evaluation_policy": {
-            "representation_protocol": "mean_pool_only_without_appended_eos",
+            "representation_protocol": REPRESENTATION_PROTOCOL_VERSION,
             "primary_rule": (
                 "Four English hubness CIs and source breadth must jointly hold for "
                 "the configured minimum consecutive layers."

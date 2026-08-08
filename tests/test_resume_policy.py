@@ -52,11 +52,10 @@ class ResumePolicyTests(unittest.TestCase):
         for name in ("metadata.csv", "sentence_layer_mean_pool.npy"):
             (root / "hidden" / name).write_bytes(b"present")
         (root / "extraction_manifest.json").write_text(json.dumps({
-            "protocol_version": "mean_pool_no_eos_v1",
+            "protocol_version": "mean_pool_v1",
             "model": "facebook/xglm-1.7B",
             "storage_dtype": storage_dtype,
             "representations": ["mean_pool"],
-            "appended_eos": False,
             "truncated_inputs": 0,
         }), encoding="utf-8")
 
@@ -78,7 +77,7 @@ class ResumePolicyTests(unittest.TestCase):
             self.write_extraction(root, "float32")
             manifest_path = root / "extraction_manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["protocol_version"] = "mean_pool_plus_eos_v0"
+            manifest["protocol_version"] = "legacy_multi_representation_v0"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             self.assertFalse(extraction_reusable(self.make_config(root, "float32")))
 

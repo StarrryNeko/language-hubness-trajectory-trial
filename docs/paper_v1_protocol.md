@@ -14,7 +14,7 @@
 ## 固定数据与表示
 
 - 完整平行语义组；每组必须包含配置中的全部 24 种语言。
-- `mean_pool` 是唯一确认性句向量；不追加 EOS；如模型支持则保留原提取协议中的 BOS。
+- `mean_pool` 是唯一确认性句向量；如模型支持则保留 BOS，但 BOS 不进入均值。
 - layer 0 单独标记，不与 Transformer block 层混称。
 - 所有模型复用同一 semantic-ID split 文件。
 - hubness、alignment、language structure 使用彼此独立的候选范围。

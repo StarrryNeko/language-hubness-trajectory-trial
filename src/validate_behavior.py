@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 from behavior_common import behavior_settings, ensure_behavior_dirs, load_tasks, sha256_file
-from common import load_config, write_json
+from common import load_config, read_jsonl, write_json
 
 
 def read_json(path, blockers):
@@ -87,12 +87,25 @@ def main():
             blockers.append(f"{name} checkpoint identity does not match checkpoint audit")
     if generation.get("activation_intervention") is not False:
         blockers.append("generation must explicitly record activation_intervention=false")
+    if generation.get("prompt_special_tokens_added") is not False:
+        blockers.append("generation does not confirm plain-text prompt encoding")
+    if generation.get("special_tokens_suppressed") is not True:
+        blockers.append("generation does not confirm special-token suppression")
+    if generation.get("generated_special_token_count") != 0:
+        blockers.append("generation contains forbidden special tokens")
     task_path = paths.data / "behavior_tasks.jsonl"
     generation_path = paths.generations / "generations.jsonl"
     if task_path.exists() and generation.get("task_file_sha256") != sha256_file(task_path):
         blockers.append("generation task hash does not match the frozen task file")
     if generation_path.exists() and generation.get("generation_file_sha256") != sha256_file(generation_path):
         blockers.append("generation manifest hash does not match generation file")
+    if generation_path.exists():
+        generation_rows = read_jsonl(generation_path)
+        expected_budget = int(settings["decoding"]["max_new_tokens"])
+        if any(row.get("finish_reason") != "token_budget" for row in generation_rows):
+            blockers.append("generation rows contain a non-budget finish reason")
+        if any(int(row.get("generated_token_count", -1)) != expected_budget for row in generation_rows):
+            blockers.append("generation rows do not all match the frozen token budget")
 
     item_path = paths.metrics / "behavior_item_results.csv"
     predictor_path = paths.metrics / "behavior_geometry_predictors.csv"

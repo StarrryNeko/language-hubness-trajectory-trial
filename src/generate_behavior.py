@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import gc
 import json
 import time
@@ -12,7 +13,13 @@ from pathlib import Path
 import numpy as np
 import torch
 from tqdm import tqdm
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    LogitsProcessorList,
+    SuppressTokensLogitsProcessor,
+)
 
 from behavior_common import (
     behavior_settings,
@@ -64,7 +71,7 @@ def extract_answer(text, method):
     raise ValueError(f"unsupported behavior output_extraction: {method}")
 
 
-def audit_prompt_lengths(tokenizer, tasks, decoding, batch_size=128):
+def audit_prompt_lengths(tokenizer, tasks, decoding, forbidden_ids, batch_size=128):
     records = []
     for start in range(0, len(tasks), int(batch_size)):
         batch = tasks[start : start + int(batch_size)]
@@ -75,6 +82,12 @@ def audit_prompt_lengths(tokenizer, tasks, decoding, batch_size=128):
             add_special_tokens=decoding["prompt_add_special_tokens"],
         )
         for task, token_ids in zip(batch, encoded["input_ids"]):
+            found = sorted(set(map(int, token_ids)) & forbidden_ids)
+            if found:
+                raise ValueError(
+                    f"behavior prompt contains tokenizer special tokens: "
+                    f"task={task['task_id']}, token_ids={found}"
+                )
             records.append((str(task["task_id"]), len(token_ids)))
     lengths = np.asarray([length for _, length in records], dtype=int)
     longest_task, maximum = max(records, key=lambda value: value[1])
@@ -135,16 +148,10 @@ def main():
     if not pending:
         manifest_path = paths.generations / "generation_manifest.json"
         if not manifest_path.exists():
-            write_manifest(manifest_path, {
-                "created_at_utc": datetime.now(timezone.utc).isoformat(),
-                "config_path": str(config_path), "model": runtime["model_id"],
-                "model_metadata": model_metadata(cfg, require=True),
-                "checkpoint_sha256": checkpoint["checkpoint_sha256"],
-                "task_file_sha256": sha256_file(paths.data / "behavior_tasks.jsonl"),
-                "generation_file_sha256": sha256_file(output), "rows": len(existing),
-                "decoding": settings["decoding"], "elapsed_seconds": 0.0,
-                "activation_intervention": False,
-            })
+            raise ValueError(
+                "complete generations have no audit manifest; refuse to reconstruct "
+                "special-token compliance after generation"
+            )
         print(f"Resume: all {len(existing)} frozen behavior tasks are already generated")
         return
     tokenizer_kwargs = {
@@ -157,13 +164,23 @@ def main():
         tokenizer_kwargs["revision"] = runtime["revision"]
     tokenizer = AutoTokenizer.from_pretrained(runtime["tokenizer"], **tokenizer_kwargs)
     tokenizer.padding_side = "left"
+    padding_token_added = False
+    padding_token_reused = False
     if tokenizer.pad_token_id is None:
-        if tokenizer.eos_token_id is None:
-            raise ValueError("generation requires a tokenizer pad or EOS token")
-        tokenizer.pad_token = tokenizer.eos_token
+        if tokenizer.unk_token_id is not None:
+            tokenizer.pad_token = tokenizer.unk_token
+            padding_token_reused = True
+        else:
+            tokenizer.add_special_tokens({"pad_token": "<|langhub_padding|>"})
+            padding_token_added = True
 
     decoding = settings["decoding"]
-    prompt_audit, prompt_tokens_by_task = audit_prompt_lengths(tokenizer, tasks, decoding)
+    forbidden_ids = set(map(int, tokenizer.all_special_ids))
+    if not forbidden_ids:
+        raise ValueError("tokenizer exposes no special-token inventory for generation auditing")
+    prompt_audit, prompt_tokens_by_task = audit_prompt_lengths(
+        tokenizer, tasks, decoding, forbidden_ids
+    )
     if prompt_audit["maximum_prompt_tokens_observed"] > decoding["max_prompt_tokens"]:
         write_json(paths.generations / "prompt_length_audit.json", prompt_audit)
         raise ValueError(
@@ -211,9 +228,18 @@ def main():
     if device == "auto":
         load_kwargs["device_map"] = "auto"
     model = AutoModelForCausalLM.from_pretrained(runtime["name"], **load_kwargs)
+    if padding_token_added:
+        model.resize_token_embeddings(len(tokenizer))
     if device != "auto":
         model.to(device)
     model.eval()
+    generation_config = copy.deepcopy(model.generation_config)
+    for field in tuple(vars(generation_config)):
+        if field.startswith("forced_") and field.endswith("_token_id"):
+            setattr(generation_config, field, None)
+    token_filters = LogitsProcessorList([
+        SuppressTokensLogitsProcessor(sorted(forbidden_ids))
+    ])
     started = time.perf_counter()
     generation_runtime = settings["generation_runtime"]
     pending_count = len(pending)
@@ -252,12 +278,13 @@ def main():
             with torch.inference_mode():
                 sequences = model.generate(
                     **encoded,
+                    generation_config=generation_config,
+                    logits_processor=token_filters,
                     do_sample=False,
                     num_beams=1,
                     max_new_tokens=decoding["max_new_tokens"],
                     use_cache=decoding["use_cache"],
                     pad_token_id=tokenizer.pad_token_id,
-                    eos_token_id=tokenizer.eos_token_id,
                 )
         except RuntimeError as exc:
             is_cuda_oom = isinstance(exc, torch.OutOfMemoryError) or (
@@ -282,9 +309,20 @@ def main():
         records = []
         for task, prompt_length, sequence in zip(batch, prompt_lengths, sequences):
             generated_ids = sequence[padded_prompt_width:].detach().cpu().tolist()
-            eos_seen = tokenizer.eos_token_id is not None and tokenizer.eos_token_id in generated_ids
-            if eos_seen:
-                generated_ids = generated_ids[: generated_ids.index(tokenizer.eos_token_id) + 1]
+            found = sorted(set(generated_ids) & forbidden_ids)
+            if found:
+                progress.close()
+                raise ValueError(
+                    f"generated output contains forbidden special tokens: "
+                    f"task={task['task_id']}, token_ids={found}"
+                )
+            if len(generated_ids) != decoding["max_new_tokens"]:
+                progress.close()
+                raise ValueError(
+                    f"generation ended before the frozen token budget: "
+                    f"task={task['task_id']}, generated={len(generated_ids)}, "
+                    f"required={decoding['max_new_tokens']}"
+                )
             raw_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
             text = extract_answer(raw_text, decoding["output_extraction"])
             records.append({
@@ -295,7 +333,7 @@ def main():
                 "generated_text": text,
                 "prompt_token_count": int(prompt_length),
                 "generated_token_count": len(generated_ids),
-                "finish_reason": "eos" if eos_seen else "max_new_tokens",
+                "finish_reason": "token_budget",
                 "decoding": decoding,
             })
         append_rows(output, records)
@@ -330,6 +368,11 @@ def main():
         "prompt_length_audit_sha256": sha256_file(
             paths.generations / "prompt_length_audit.json"
         ),
+        "prompt_special_tokens_added": False,
+        "generated_special_token_count": 0,
+        "special_tokens_suppressed": True,
+        "padding_token_added": padding_token_added,
+        "padding_token_reused": padding_token_reused,
         "elapsed_seconds": elapsed,
         "activation_intervention": False,
     })

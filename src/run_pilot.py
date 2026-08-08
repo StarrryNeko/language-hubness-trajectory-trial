@@ -69,7 +69,7 @@ def main():
     if not args.skip_extract:
         extract_args = ["--show-sentences", args.show_sentences] if args.show_sentences else []
         steps.append((
-            "Extract mean-pool sentence vectors without appended EOS",
+            "Extract mean-pool sentence vectors",
             src_dir / "extract_hidden.py",
             extract_args,
         ))

@@ -2,7 +2,7 @@
 
 > 适用清单：`configs/model_suite_week1_required_random200.json`  
 > 条件扩展：`configs/model_suite_week1_with_moonlight_random200.json`  
-> 正式协议：24语言、随机200 semantic IDs、全部层、mean-pool、不追加EOS、BF16推理、FP32句向量存储。
+> 正式协议：24语言、随机200 semantic IDs、全部层、仅 mean-pool、BF16推理、FP32句向量存储。
 
 ## 结论先行
 

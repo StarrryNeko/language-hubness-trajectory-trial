@@ -61,10 +61,9 @@ class CompareModelTests(unittest.TestCase):
             },
         }), encoding="utf-8")
         (output / "extraction_manifest.json").write_text(json.dumps({
-            "protocol_version": "mean_pool_no_eos_v1",
+            "protocol_version": "mean_pool_v1",
             "layers": 3,
             "representations": ["mean_pool"],
-            "appended_eos": False,
         }), encoding="utf-8")
         config = {
             "experiment_name": f"experiment_{number}",
@@ -125,7 +124,7 @@ class CompareModelTests(unittest.TestCase):
             self.assertEqual(verdict["model_statuses"][1]["status"], "ROBUST")
             self.assertEqual(
                 verdict["evaluation_policy"]["representation_protocol"],
-                "mean_pool_only_without_appended_eos",
+                "mean_pool_v1",
             )
 
     def test_primary_only_replication_is_reported_separately_from_density_robustness(self):

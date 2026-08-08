@@ -45,12 +45,12 @@ class ExtractionValidationTests(unittest.TestCase):
         self.assertEqual(cfg["dtype"], "float32")
         self.assertEqual(cfg["storage_dtype"], "float32")
 
-    def test_active_protocol_extracts_only_mean_pool_without_eos(self):
+    def test_active_protocol_extracts_only_mean_pool(self):
         root = Path(__file__).resolve().parents[1]
         cfg = load_config(root / "configs" / "qwen25_1_5b_mvp.json")
         self.assertEqual(configured_representations(cfg), ["mean_pool"])
         self.assertNotIn("validation_representation", cfg["metrics"])
-        self.assertNotIn("append_sentinel_eos", cfg.get("representation_controls", {}))
+        self.assertEqual(cfg["metrics"]["primary_representation"], "mean_pool")
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ class SameSemanticMetricTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "below 20B"):
             classify_model_size(20.0)
 
-    def test_official_config_has_only_two_representations_and_24_languages(self):
+    def test_official_config_has_only_mean_pool_and_24_languages(self):
         cfg = load_config(Path(__file__).resolve().parents[1] / "configs" / "qwen25_1_5b_mvp.json")
         self.assertEqual(configured_representations(cfg), ["mean_pool"])
         self.assertEqual(len(validate_language_inventory(cfg)), 24)

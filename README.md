@@ -22,10 +22,7 @@ python src/run_formal_suite.py \
 
 本项目研究多语言因果语言模型中，英语是否在层间表示空间里成为 hub。当前正式协议只使用：
 
-- `mean_pool`：对原句 tokenizer 文本 token 的 hidden state 求均值；可选 BOS 不进入均值，输入末尾不追加 EOS。
-
-旧版的 `sentinel_eos`、`last_token`、`last_content_token`、`shared_sentinel` 和
-`content_mean_pool` 不再参与新实验。
+- `mean_pool`：对原句 tokenizer 文本 token 的 hidden state 求均值；可选 BOS 不进入均值。代码只允许这一种句向量表示。
 
 模型、tokenizer 与 FLORES+ 的 Hugging Face 缓存统一配置在
 `/root/autodl-tmp/huggingface`，避免占用 AutoDL 系统盘。修改
@@ -85,7 +82,7 @@ python src/run_model_suite.py --suite configs/model_suite_24lang.json
 
 ## paper_v1 离线正式分析
 
-模型已经完成 `mean_pool_no_eos_v1` hidden-state 提取时，不要重新加载模型权重。直接运行：
+模型已经完成 `mean_pool_v1` hidden-state 提取时，不要重新加载模型权重。直接运行：
 
 ```bash
 python src/run_paper_analysis.py \

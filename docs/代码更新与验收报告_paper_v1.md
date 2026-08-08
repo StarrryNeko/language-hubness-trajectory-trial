@@ -2,7 +2,7 @@
 
 ## Overall Assessment: Ready for server method reanalysis
 
-代码已经能够对兼容的 `mean_pool_no_eos_v1` hidden arrays 完成离线论文分析，并将旧 `first_n` 结果与正式随机样本结果分级。真实三模型结果尚未在本机重算，因此当前验收只覆盖软件正确性、合成端到端运行和历史 artifact 兼容性，不包含新的实证结论。
+代码已经能够对兼容的 `mean_pool_v1` hidden arrays 完成离线论文分析，并将旧 `first_n` 结果与正式随机样本结果分级。真实三模型结果尚未在本机重算，因此当前验收只覆盖软件正确性、合成端到端运行和历史 artifact 兼容性，不包含新的实证结论。
 
 ## 已实现模块
 
@@ -52,4 +52,3 @@
 ## 结论边界
 
 当前代码不会把离线几何结果升级为行为或因果结论。`behavior_association_status` 与 `intervention_status` 保持 `NOT_RUN`。生成任务、语言识别器、行为质量指标和激活方向应在正式三模型几何状态确定后冻结；否则容易根据有利层和模型反向设计干预。
-

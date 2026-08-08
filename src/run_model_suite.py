@@ -12,6 +12,7 @@ from common import (
     load_config,
     model_metadata,
     representation_file_map,
+    REPRESENTATION_PROTOCOL_VERSION,
     resolve_model_source,
 )
 from evidence_rules import validate_model_status_payload
@@ -161,11 +162,10 @@ def extraction_reusable(cfg):
     elif expected_strategy == "random_without_replacement":
         data_hash_matches = False
     return (
-        manifest.get("protocol_version") == "mean_pool_no_eos_v1"
+        manifest.get("protocol_version") == REPRESENTATION_PROTOCOL_VERSION
         and manifest.get("model") == expected_model
         and manifest.get("storage_dtype") == expected_storage
         and manifest_representations == set(configured_representations(cfg))
-        and manifest.get("appended_eos") is False
         and truncated_inputs == 0
         and data_hash_matches
         and revision_matches

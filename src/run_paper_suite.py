@@ -33,7 +33,7 @@ def main():
         cfg = load_config(config_path)
         if not extraction_reusable(cfg):
             message = (
-                f"No reusable mean_pool_no_eos_v1 extraction for {config_path}; "
+                f"No reusable mean_pool_v1 extraction for {config_path}; "
                 "paper suite will not start the model."
             )
             if args.require_all:
@@ -66,4 +66,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -19,6 +19,7 @@ from common import (
     ensure_dirs,
     load_config,
     model_metadata,
+    REPRESENTATION_PROTOCOL_VERSION,
     read_jsonl,
     representation_file_map,
     resolve_model_source,
@@ -288,7 +289,7 @@ def main():
     truncated = sum(row["was_truncated"] for row in meta_rows)
     peak_gpu = torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
     manifest = {
-        "protocol_version": "mean_pool_no_eos_v1",
+        "protocol_version": REPRESENTATION_PROTOCOL_VERSION,
         "model": settings["model_id"],
         "resolved_model_source": settings["name"],
         "model_loaded_from_local_directory": settings["local_files_only"],
@@ -310,7 +311,6 @@ def main():
         "prepend_bos_when_available": prepend_bos,
         "text_tokenization_add_special_tokens": False,
         "text_max_length": text_max_length,
-        "appended_eos": False,
         "mean_pool_excludes_prepended_bos": True,
         "candidate_scope": "same_semantic_id_only",
         "storage_dtype": storage_dtype_name,

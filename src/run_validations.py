@@ -5,7 +5,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from common import configured_representations, ensure_dirs, load_config, representation_file_map
+from common import (
+    REPRESENTATION_PROTOCOL_VERSION,
+    configured_representations,
+    ensure_dirs,
+    load_config,
+    representation_file_map,
+)
 from evidence_rules import classify_model_status, joint_positive_layers, max_consecutive_layers
 from numerical_validation import validate_representation_array
 
@@ -87,15 +93,13 @@ def main():
     if extraction_manifest_path.exists():
         extraction_manifest = json.loads(extraction_manifest_path.read_text(encoding="utf-8"))
         protocol_ok = (
-            extraction_manifest.get("protocol_version") == "mean_pool_no_eos_v1"
+            extraction_manifest.get("protocol_version") == REPRESENTATION_PROTOCOL_VERSION
             and extraction_manifest.get("representations") == ["mean_pool"]
-            and extraction_manifest.get("appended_eos") is False
         )
         extraction_ok &= protocol_ok
         extraction_evidence.append(
             "Extraction protocol: "
-            f"representations={extraction_manifest.get('representations')}, "
-            f"appended_eos={extraction_manifest.get('appended_eos')}"
+            f"representations={extraction_manifest.get('representations')}"
         )
     else:
         extraction_ok = False
@@ -132,8 +136,8 @@ def main():
     else:
         expected_metric_layers = list(range(next(iter(extraction_layer_counts))))
     reports.append(report(
-        "Mean-pool extraction without appended EOS", "PASS" if extraction_ok else "FAIL",
-        "Verify that mean_pool is the only representation, no EOS vector is required, and the array is finite and aligned.",
+        "Mean-pool-only extraction", "PASS" if extraction_ok else "FAIL",
+        "Verify that mean_pool is the only representation and the array is finite and aligned.",
         extraction_evidence,
         "Sentence representations follow the revised protocol." if extraction_ok else "Extraction is unsafe.",
         [] if extraction_ok else ["Rerun extract_hidden.py before computing metrics."],
@@ -142,19 +146,17 @@ def main():
     if metric_manifest_path.exists():
         metric_manifest = json.loads(metric_manifest_path.read_text(encoding="utf-8"))
         isolated = (
-            metric_manifest.get("protocol_version") == "mean_pool_no_eos_v1"
+            metric_manifest.get("protocol_version") == REPRESENTATION_PROTOCOL_VERSION
             and metric_manifest.get("candidate_scope") == "same_semantic_id_only"
             and metric_manifest.get("cross_semantic_similarity_computed") is False
             and metric_manifest.get("bootstrap_unit") == "semantic_id"
             and metric_manifest.get("representations") == ["mean_pool"]
-            and metric_manifest.get("appended_eos") is False
         )
         isolation_evidence = [
             f"candidate_scope={metric_manifest.get('candidate_scope')}",
             f"cross_semantic_similarity_computed={metric_manifest.get('cross_semantic_similarity_computed')}",
             f"bootstrap_unit={metric_manifest.get('bootstrap_unit')}",
             f"representations={metric_manifest.get('representations')}",
-            f"appended_eos={metric_manifest.get('appended_eos')}",
         ]
     else:
         isolated, isolation_evidence = False, ["metrics_manifest.json is missing"]
@@ -325,7 +327,7 @@ def main():
         "model_status": model_rule["status"],
         "joint_evidence": model_rule,
         "reports": [{"file_stem": stem, "name": item["name"], "status": item["status"]} for stem, item in zip(stems, reports)],
-        "claim_rule": "English hubness requires same-layer reverse-kNN, centrality/rank, medoid, source-breadth, local-density, k, and multi-model evidence; EOS is not computed.",
+        "claim_rule": "English hubness requires same-layer reverse-kNN, centrality/rank, medoid, source-breadth, local-density, k, and multi-model evidence under mean_pool_v1.",
     }
     (validation / "validation_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     lines = [

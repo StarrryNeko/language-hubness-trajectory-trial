@@ -90,11 +90,10 @@ def main():
         "candidate_scope": "same_semantic_id_only",
     }), encoding="utf-8")
     (output / "extraction_manifest.json").write_text(json.dumps({
-        "protocol_version": "mean_pool_no_eos_v1",
+        "protocol_version": "mean_pool_v1",
         "layers": layers,
         "storage_dtype": "float32",
         "representations": ["mean_pool"],
-        "appended_eos": False,
     }), encoding="utf-8")
 
     for script in ["compute_metrics.py", "plot_trajectories.py", "run_validations.py"]:

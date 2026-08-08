@@ -7,6 +7,9 @@ from pathlib import Path
 import numpy as np
 
 
+REPRESENTATION_PROTOCOL_VERSION = "mean_pool_v1"
+
+
 MODEL_SIZE_CLASSES = ("S", "M", "L")
 
 
@@ -237,7 +240,7 @@ def configured_representations(cfg):
     if primary != "mean_pool":
         raise ValueError("metrics.primary_representation must be mean_pool")
     if "validation_representation" in metrics:
-        raise ValueError("Remove metrics.validation_representation; EOS validation is disabled")
+        raise ValueError("Remove metrics.validation_representation; mean_pool is the sole method")
     return names
 
 

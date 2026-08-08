@@ -4,3 +4,7 @@
 # Local model-download environment and offline model weights
 /.venv-model-download/
 /langhub_models/
+
+# Python bytecode is generated locally and must never be part of the protocol.
+__pycache__/
+*.py[cod]

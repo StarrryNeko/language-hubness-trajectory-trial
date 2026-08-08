@@ -17,6 +17,7 @@ from common import (
     l2_normalize,
     load_config,
     representation_file_map,
+    REPRESENTATION_PROTOCOL_VERSION,
     validate_language_inventory,
 )
 from numerical_validation import (
@@ -406,7 +407,7 @@ def main():
         "=== SAME-SEMANTICS MULTILINGUAL HUBNESS REPORT ===",
         f"Rows={len(meta)}; semantic_groups={len(semantic_ids)}; languages={len(languages)}; k={k}",
         "Candidate scope: same semantic ID only (cross-semantic candidates are never compared)",
-        f"Representation={primary}; appended EOS=False; similarity controls={methods}",
+        f"Representation={primary}; similarity controls={methods}",
         "English positive-CI layer counts: " + ", ".join(
             f"{name}={int(count)}" for name, count in supported.items()
         ),
@@ -420,7 +421,7 @@ def main():
     ]
     (metrics_dir / "research_summary.txt").write_text("\n".join(report), encoding="utf-8")
     manifest = {
-        "protocol_version": "mean_pool_no_eos_v1",
+        "protocol_version": REPRESENTATION_PROTOCOL_VERSION,
         "candidate_scope": "same_semantic_id_only",
         "cross_semantic_similarity_computed": False,
         "semantic_groups": len(semantic_ids),
@@ -428,7 +429,6 @@ def main():
         "k": k,
         "representations": representations,
         "similarity_methods": methods,
-        "appended_eos": False,
         "bootstrap_unit": "semantic_id",
         "joint_evidence_rule": "all_four_ci_lower_gt_zero_on_same_layer",
         "output_files": list(outputs),
