@@ -149,6 +149,31 @@ def configured_context_window(model_config, tokenizer):
     return min(candidates) if candidates else None
 
 
+def memory_guided_batch_size(
+    current_batch_size,
+    minimum_batch_size,
+    maximum_batch_size,
+    baseline_allocated_bytes,
+    peak_allocated_bytes,
+    total_device_bytes,
+    target_memory_fraction,
+    maximum_growth_factor,
+):
+    """Estimate a safe larger batch from the measured per-batch CUDA peak."""
+    current = int(current_batch_size)
+    dynamic_bytes = int(peak_allocated_bytes) - int(baseline_allocated_bytes)
+    target_bytes = float(total_device_bytes) * float(target_memory_fraction)
+    dynamic_budget = target_bytes - int(baseline_allocated_bytes)
+    if dynamic_bytes <= 0 or dynamic_budget <= dynamic_bytes:
+        return current
+    estimated = int(current * dynamic_budget / dynamic_bytes)
+    growth_cap = max(current + 1, int(current * float(maximum_growth_factor)))
+    return max(
+        int(minimum_batch_size),
+        min(int(maximum_batch_size), growth_cap, max(current, estimated)),
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate behavior_v1 translations")
     parser.add_argument("--config", required=True)
@@ -282,9 +307,12 @@ def main():
             pending,
             key=lambda row: (-prompt_tokens_by_task[str(row["task_id"])], str(row["task_id"])),
         )
-    effective_batch_size = generation_runtime["maximum_batch_size"]
+    effective_batch_size = generation_runtime["initial_batch_size"]
     minimum_batch_size = generation_runtime["minimum_batch_size"]
     batch_sizes_used = []
+    batch_adjustments = []
+    oom_events = 0
+    peak_gpu_memory_bytes = 0
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     cursor = 0
@@ -294,7 +322,11 @@ def main():
         batch = pending[cursor : cursor + current_batch_size]
         encoded = None
         sequences = None
+        baseline_allocated_bytes = 0
         try:
+            if torch.cuda.is_available():
+                baseline_allocated_bytes = torch.cuda.memory_allocated()
+                torch.cuda.reset_peak_memory_stats()
             encoded = tokenizer(
                 [row["prompt"] for row in batch],
                 return_tensors="pt",
@@ -333,12 +365,25 @@ def main():
             del encoded, sequences
             gc.collect()
             torch.cuda.empty_cache()
-            effective_batch_size = max(minimum_batch_size, current_batch_size // 2)
+            oom_events += 1
+            backed_off = int(current_batch_size * generation_runtime["oom_backoff_factor"])
+            effective_batch_size = max(
+                minimum_batch_size, min(current_batch_size - 1, backed_off)
+            )
+            batch_adjustments.append({
+                "reason": "cuda_oom_backoff",
+                "from_batch_size": current_batch_size,
+                "to_batch_size": effective_batch_size,
+            })
             print(
                 f"CUDA OOM at batch={current_batch_size}; retrying with "
                 f"batch={effective_batch_size}", flush=True,
             )
             continue
+        measured_peak_bytes = 0
+        if torch.cuda.is_available():
+            measured_peak_bytes = torch.cuda.max_memory_allocated()
+            peak_gpu_memory_bytes = max(peak_gpu_memory_bytes, measured_peak_bytes)
         padded_prompt_width = int(encoded["input_ids"].shape[1])
         records = []
         for task, prompt_length, sequence in zip(batch, prompt_lengths, sequences):
@@ -375,6 +420,35 @@ def main():
         cursor += len(batch)
         batch_sizes_used.append(len(batch))
         progress.update(len(batch))
+        if (
+            torch.cuda.is_available()
+            and generation_runtime["adaptive_batch_sizing"]
+            and current_batch_size == effective_batch_size
+            and effective_batch_size < generation_runtime["maximum_batch_size"]
+        ):
+            next_batch_size = memory_guided_batch_size(
+                current_batch_size=current_batch_size,
+                minimum_batch_size=minimum_batch_size,
+                maximum_batch_size=generation_runtime["maximum_batch_size"],
+                baseline_allocated_bytes=baseline_allocated_bytes,
+                peak_allocated_bytes=measured_peak_bytes,
+                total_device_bytes=torch.cuda.get_device_properties(0).total_memory,
+                target_memory_fraction=generation_runtime["target_gpu_memory_fraction"],
+                maximum_growth_factor=generation_runtime["maximum_batch_growth_factor"],
+            )
+            if next_batch_size != effective_batch_size:
+                batch_adjustments.append({
+                    "reason": "measured_memory_growth",
+                    "from_batch_size": effective_batch_size,
+                    "to_batch_size": next_batch_size,
+                    "measured_peak_gpu_memory_gib": measured_peak_bytes / 1024**3,
+                })
+                print(
+                    f"CUDA batch autotune: batch={effective_batch_size} -> "
+                    f"{next_batch_size}, measured_peak={measured_peak_bytes / 1024**3:.2f} GiB",
+                    flush=True,
+                )
+                effective_batch_size = next_batch_size
     progress.close()
 
     final_rows, final_ids = load_existing(output)
@@ -395,9 +469,9 @@ def main():
         "generation_runtime": generation_runtime,
         "effective_batch_size_max": max(batch_sizes_used, default=0),
         "effective_batch_size_min": min(batch_sizes_used, default=0),
-        "peak_gpu_memory_gib": (
-            torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
-        ),
+        "batch_adjustments": batch_adjustments,
+        "cuda_oom_events": oom_events,
+        "peak_gpu_memory_gib": peak_gpu_memory_bytes / 1024**3,
         "tasks_per_second": pending_count / max(elapsed, 1e-9),
         "prompt_length_audit_sha256": sha256_file(
             paths.generations / "prompt_length_audit.json"

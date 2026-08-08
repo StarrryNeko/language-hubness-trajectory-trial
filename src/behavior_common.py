@@ -124,8 +124,28 @@ def behavior_settings(cfg) -> dict:
         "maximum_batch_size", decoding.get("batch_size", cfg.get("batch_size", 1))
     ))
     minimum_batch_size = int(generation_runtime.get("minimum_batch_size", 1))
-    if minimum_batch_size < 1 or maximum_batch_size < minimum_batch_size:
+    initial_batch_size = int(generation_runtime.get(
+        "initial_batch_size", maximum_batch_size
+    ))
+    target_gpu_memory_fraction = float(generation_runtime.get(
+        "target_gpu_memory_fraction", 0.88
+    ))
+    maximum_batch_growth_factor = float(generation_runtime.get(
+        "maximum_batch_growth_factor", 2.0
+    ))
+    oom_backoff_factor = float(generation_runtime.get("oom_backoff_factor", 0.75))
+    if (
+        minimum_batch_size < 1
+        or maximum_batch_size < minimum_batch_size
+        or not minimum_batch_size <= initial_batch_size <= maximum_batch_size
+    ):
         raise ValueError("behavior_v1 generation runtime batch sizes are invalid")
+    if not 0.0 < target_gpu_memory_fraction < 1.0:
+        raise ValueError("target_gpu_memory_fraction must lie strictly between 0 and 1")
+    if maximum_batch_growth_factor <= 1.0:
+        raise ValueError("maximum_batch_growth_factor must exceed 1")
+    if not 0.0 < oom_backoff_factor < 1.0:
+        raise ValueError("oom_backoff_factor must lie strictly between 0 and 1")
     language_id = dict(behavior.get("language_id", {}))
     if language_id.get("reference_gate") != "top1_label_accuracy":
         raise ValueError("behavior_v1 reference LID gate must use top1_label_accuracy")
@@ -179,9 +199,16 @@ def behavior_settings(cfg) -> dict:
         "quality": dict(behavior.get("quality", {})),
         "resources": resource_settings(cfg),
         "generation_runtime": {
+            "initial_batch_size": initial_batch_size,
             "maximum_batch_size": maximum_batch_size,
             "minimum_batch_size": minimum_batch_size,
             "oom_backoff": bool(generation_runtime.get("oom_backoff", True)),
+            "oom_backoff_factor": oom_backoff_factor,
+            "adaptive_batch_sizing": bool(
+                generation_runtime.get("adaptive_batch_sizing", True)
+            ),
+            "target_gpu_memory_fraction": target_gpu_memory_fraction,
+            "maximum_batch_growth_factor": maximum_batch_growth_factor,
             "length_bucketed_batching": bool(
                 generation_runtime.get("length_bucketed_batching", False)
             ),

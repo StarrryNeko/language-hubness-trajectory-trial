@@ -44,6 +44,17 @@
       "max_prompt_tokens": 1024,
       "output_extraction": "first_nonempty_line"
     },
+    "generation_runtime": {
+      "initial_batch_size": 64,
+      "maximum_batch_size": 512,
+      "minimum_batch_size": 8,
+      "oom_backoff": true,
+      "oom_backoff_factor": 0.75,
+      "adaptive_batch_sizing": true,
+      "target_gpu_memory_fraction": 0.88,
+      "maximum_batch_growth_factor": 2.0,
+      "length_bucketed_batching": true
+    },
     "local_scaling_k": 5,
     "bootstrap_samples": 1000,
     "confidence_level": 0.95,
