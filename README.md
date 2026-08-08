@@ -4,6 +4,9 @@
 
 - V1（冻结归档）：`src/behavior_v1/`、`configs/behavior_v1/`、`docs/behavior_v1/`
 - V2（script-aware）：`src/behavior_v2/`、`configs/behavior_v2/`、`docs/behavior_v2/`
+- V2 当前规范：`docs/behavior_v2/design_framework.md`（geometry-only 主实验）
+- 结构主实验实现：`src/structure_v2/`、`docs/structure_v2/`
+- 第三阶段行为关联：`src/behavior_association_v3/`、`configs/behavior_association_v3/`、`docs/behavior_association_v3/`
 - 项目结构：`docs/project_structure.md`
 - V2 服务器流程：`docs/behavior_v2/server_runbook.md`
 

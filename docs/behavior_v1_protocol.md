@@ -1,5 +1,9 @@
 # behavior_v1：行为关联实验协议（无激活干预）
 
+> 历史冻结警告：V1 生成器屏蔽原生 EOS，并要求每条输出消耗完整256-token预算。
+> 该行为仅保留用于精确复现既有 V1 产物，不得用于新的正式实验。新实验使用
+> `behavior_association_v3`。V1 历史复现必须显式传入 `--allow-legacy-fixed-budget`。
+
 ## 研究问题与结论边界
 
 本协议检验冻结的表示几何是否能够预测未参与几何分析的翻译行为。它是观察性关联实验，不读取、替换或编辑生成过程中的 activation，不支持因果措辞。
@@ -38,7 +42,7 @@ fastText 置信度阈值只能在独立校准集上扫描。校准集固定使�
 ```bash
 python src/run_behavior_suite.py \
   --suite configs/model_suite_behavior_v1.json \
-  --resume
+  --resume --allow-legacy-fixed-budget
 ```
 
 若 hidden states、checkpoint audit 和 generations 已存在，只重新做离线评估：

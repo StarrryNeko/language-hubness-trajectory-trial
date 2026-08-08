@@ -53,10 +53,20 @@ def main():
     parser.add_argument("--skip-extraction", action="store_true")
     parser.add_argument("--skip-generation", action="store_true")
     parser.add_argument(
+        "--allow-legacy-fixed-budget", action="store_true",
+        help="Authorize archived V1 EOS-suppressed generation for exact reproduction only.",
+    )
+    parser.add_argument(
         "--stage", choices=("all", "prepare", "generate", "analyze"), default="all",
         help="Run the complete pipeline or one restartable stage.",
     )
     args = parser.parse_args()
+    will_generate = args.stage in {"all", "generate"} and not args.skip_generation
+    if will_generate and not args.allow_legacy_fixed_budget:
+        parser.error(
+            "behavior_v1 generation suppresses EOS and forces the full token budget; "
+            "pass --allow-legacy-fixed-budget only for frozen V1 reproduction"
+        )
     suite_path = Path(args.suite).resolve()
     suite = json.loads(suite_path.read_text(encoding="utf-8"))
     config_paths = [suite_path.parent / value for value in suite["configs"]]
@@ -100,6 +110,7 @@ def main():
     for config_path in config_paths:
         if args.stage in {"all", "generate"} and not args.skip_generation:
             generation_args = ["--config", config_path]
+            generation_args.append("--allow-legacy-fixed-budget")
             if args.resume:
                 generation_args.append("--resume")
             call(src / "generate_behavior.py", *generation_args)

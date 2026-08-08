@@ -201,9 +201,8 @@ def main():
         model.to(device)
     model.eval()
     generation_config = copy.deepcopy(model.generation_config)
-    # Read the model's native end-of-sequence control through one neutral field
-    # name. It is used only to stop decoding and is removed before text output.
-    termination_field = "e" + "os_token_id"
+    # Native EOS stops decoding and is removed before text output.
+    termination_field = "eos_token_id"
     termination_ids = flatten_token_ids(
         getattr(tokenizer, termination_field, None),
         getattr(model_config, termination_field, None),

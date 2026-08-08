@@ -15,6 +15,7 @@
   },
   "behavior_v1": {
     "enabled": true,
+    "legacy_generation_protocol": "archive_only_fixed_budget_with_eos_suppressed",
     "result_directory": "behavior_v1",
     "seed": 20260807,
     "expected_selected_semantic_indices_sha256": "68dc00e4358d700742884a58290b0220e850a00ae098f6a30decf827f851d60c",

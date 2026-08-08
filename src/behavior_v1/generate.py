@@ -183,7 +183,20 @@ def main():
     parser = argparse.ArgumentParser(description="Generate behavior_v1 translations")
     parser.add_argument("--config", required=True)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--allow-legacy-fixed-budget", action="store_true",
+        help=(
+            "Explicitly authorize the archived V1 protocol that suppresses EOS and "
+            "forces every output to consume max_new_tokens. Never use for V3."
+        ),
+    )
     args = parser.parse_args()
+    if not args.allow_legacy_fixed_budget:
+        parser.error(
+            "behavior_v1 generation is an archived fixed-budget/EOS-suppressed protocol; "
+            "use behavior_association_v3 for new runs, or pass "
+            "--allow-legacy-fixed-budget only to reproduce frozen V1 artifacts"
+        )
     config_path = Path(args.config).resolve()
     cfg = load_config(config_path)
     settings = behavior_settings(cfg)

@@ -1,0 +1,16 @@
+{
+  "extends": "base.json",
+  "experiment_name": "aya_23_8b_behavior_association_v3",
+  "model": {
+    "name_or_path": "CohereLabs/aya-23-8B", "model_root": "/root/autodl-tmp/models",
+    "family": "Aya", "generation": "Aya-23", "parameter_count_billions": 8.03,
+    "size_class": "M", "training_stage": "instruction_tuning", "architecture_type": "dense",
+    "trust_remote_code": false
+  },
+  "output_dir": "outputs_behavior_v2/aya_23_8b",
+  "structure_v2": {"primary_layer": 31, "analysis_layers": [30, 31, 32]},
+  "behavior_association_v3": {
+    "primary_layer": 31, "analysis_layers": [30, 31, 32],
+    "generation_runtime": {"initial_batch_size": 48, "maximum_batch_size": 96, "minimum_batch_size": 2}
+  }
+}

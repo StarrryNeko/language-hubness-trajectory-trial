@@ -1,4 +1,8 @@
-# behavior_v1 GPU/24 核服务器操作流程
+# behavior_v1 GPU/24 核服务器操作流程（历史复现专用）
+
+> V1 会屏蔽原生 EOS 并强制生成完整 token budget。不要用它启动新实验。
+> 只有复现冻结 V1 产物时才设置 `ALLOW_LEGACY_FIXED_BUDGET=1`；新实验使用
+> `behavior_association_v3`。
 
 ## 资源分工
 
@@ -46,6 +50,7 @@ $LHT_MODEL_ROOT/
 正式重跑前必须先完成独立 LID 校准；未生成并核验校准 manifest 时不要运行本节命令。
 
 ```bash
+export ALLOW_LEGACY_FIXED_BUDGET=1
 bash scripts/run_behavior_v1_gpu.sh all 2>&1 | tee behavior_v1_all.log
 ```
 
@@ -123,7 +128,7 @@ python src/run_behavior_suite.py \
 
 python src/run_behavior_suite.py \
   --suite configs/model_suite_behavior_v1.json \
-  --stage generate --resume
+  --stage generate --resume --allow-legacy-fixed-budget
 
 python src/run_behavior_suite.py \
   --suite configs/model_suite_behavior_v1.json \

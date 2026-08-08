@@ -57,10 +57,15 @@ fi
 
 case "$STAGE" in
   all|prepare|generate|analyze)
+    LEGACY_ARGS=()
+    if [[ "${ALLOW_LEGACY_FIXED_BUDGET:-0}" == "1" ]]; then
+      LEGACY_ARGS+=(--allow-legacy-fixed-budget)
+    fi
     "$PYTHON_BIN" src/run_behavior_suite.py \
       --suite "$SUITE" \
       --stage "$STAGE" \
-      --resume
+      --resume \
+      "${LEGACY_ARGS[@]}"
     ;;
   *)
     echo "Usage: bash scripts/run_behavior_v1_gpu.sh [all|prepare|generate|analyze]" >&2

@@ -1,0 +1,12 @@
+{
+  "configs": ["xglm_1b7.json", "mistral_7b_v01.json", "aya_23_8b.json"],
+  "comparison_output_dir": "outputs_behavior_v2/model_comparison_behavior_association_v3",
+  "model_roles": {
+    "xglm_1b7_behavior_association_v3": "expected_positive",
+    "mistral_7b_v01_behavior_association_v3": "frozen_contrast",
+    "aya_23_8b_behavior_association_v3": "expected_positive"
+  },
+  "model_list_frozen_before_results": true,
+  "negative_non_significance_is_not_equivalence": true,
+  "activation_intervention": false
+}
