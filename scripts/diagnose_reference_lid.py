@@ -3,10 +3,13 @@
 The script never writes experiment results. It loads the frozen reference-text
 task file and reports, per target language:
 
-- accuracy under the frozen confidence threshold;
+- accuracy under the frozen confidence threshold, computed on the same
+  (semantic_id, target_lang) audit units as evaluate_behavior_outputs.py;
 - raw fastText labels before and after label_map;
 - whether failures are label errors or threshold-only (correct label below
   the confidence threshold);
+- confidence percentiles for correctly labeled references and a threshold
+  sweep for diagnosis only;
 - concrete error examples.
 
 An optional --output path writes a JSON diagnostic report; without it the
@@ -18,6 +21,8 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+
+import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +57,25 @@ def load_fasttext(settings):
 
 def normalize(text):
     return " ".join(str(text).split())
+
+
+def percentile_summary(values):
+    if not values:
+        return None
+    array = np.asarray(sorted(values), dtype=float)
+    percentiles = [5.0, 10.0, 25.0, 50.0, 75.0, 90.0, 95.0]
+    return {
+        "count": int(len(array)),
+        "min": float(array[0]),
+        "p5": float(np.percentile(array, 5.0)),
+        "p10": float(np.percentile(array, 10.0)),
+        "p25": float(np.percentile(array, 25.0)),
+        "p50": float(np.percentile(array, 50.0)),
+        "p75": float(np.percentile(array, 75.0)),
+        "p90": float(np.percentile(array, 90.0)),
+        "p95": float(np.percentile(array, 95.0)),
+        "max": float(array[-1]),
+    }
 
 
 def main():
@@ -129,6 +153,16 @@ def main():
             "empty_reference": False,
         })
 
+    # Match the frozen evaluation gate: one audit unit per (semantic_id, target_lang).
+    unique_records = []
+    seen_units = set()
+    for record in records:
+        unit = (record["semantic_id"], record["target_lang"])
+        if unit not in seen_units:
+            seen_units.add(unit)
+            unique_records.append(record)
+    records = unique_records
+
     by_language = {}
     error_examples = {}
     for target in sorted({record["target_lang"] for record in records}):
@@ -155,6 +189,10 @@ def main():
         top_raw = sorted(raw_counts.items(), key=lambda item: (-item[1], str(item[0])))
         top_mapped = sorted(mapped_counts.items(), key=lambda item: (-item[1], str(item[0])))
         mean_confidence = sum(record["confidence"] for record in group) / len(group)
+        correct_label_confidences = [
+            record["confidence"] for record in group if record["label_correct"]
+        ]
+        confidence_percentiles = percentile_summary(correct_label_confidences)
         examples = []
         for record in sorted(
             failures, key=lambda item: (-item["confidence"], item["semantic_id"])
@@ -187,6 +225,7 @@ def main():
             "failures": len(failures),
             "label_errors": len(label_errors),
             "threshold_only": len(threshold_only),
+            "correct_label_confidence_percentiles": confidence_percentiles,
             "top_raw_labels": top_raw[: max(1, args.top_labels)],
             "top_mapped_labels": top_mapped[: max(1, args.top_labels)],
         }
@@ -202,6 +241,25 @@ def main():
         for target, summary in by_language.items()
         if summary["failures"] > 0
     }
+
+    threshold_candidates = sorted({
+        0.0, 0.10, 0.20, 0.30, 0.40, 0.45, 0.50, 0.55, 0.60,
+        0.625, 0.65, 0.675, 0.687, 0.69, 0.70, 0.75,
+    })
+    threshold_sweep = []
+    for candidate in threshold_candidates:
+        passed = sum(
+            1 for record in records
+            if record["label_correct"] and record["confidence"] >= candidate
+        )
+        accuracy = passed / total
+        threshold_sweep.append({
+            "threshold": candidate,
+            "accuracy": accuracy,
+            "pass": bool(accuracy >= required_accuracy),
+            "recovered_correct": int(passed),
+        })
+
     report = {
         "protocol_version": "behavior_v1_reference_lid_diagnostic_v1",
         "config_path": str(config_path),
@@ -210,7 +268,8 @@ def main():
         "confidence_threshold": threshold,
         "required_accuracy": required_accuracy,
         "label_map": label_map,
-        "rows": total,
+        "task_rows": len(tasks),
+        "audit_rows": total,
         "semantic_ids": len({record["semantic_id"] for record in records}),
         "overall_accuracy": overall_accuracy,
         "overall_pass": bool(overall_accuracy >= required_accuracy),
@@ -218,11 +277,18 @@ def main():
         "failure_languages": failure_languages,
         "by_language": by_language,
         "failure_examples": error_examples,
+        "threshold_sweep": threshold_sweep,
+        "note": (
+            "Diagnostic threshold sweep is computed on the frozen evaluation "
+            "references and is for diagnosis only; the final frozen threshold "
+            "must be chosen on an independent calibration set before rerunning."
+        ),
     }
 
     print(f"Reference LID diagnosis: {task_path}")
     print(f"Model: {model_path}")
     print(f"Threshold: {threshold:.3f} | Required accuracy: {required_accuracy:.3f}")
+    print(f"Audit units: {total} (task rows: {len(tasks)}; duplicate condition rows removed)")
     print(f"Overall: {total_correct}/{total} = {overall_accuracy:.4f} "
           f"({'PASS' if report['overall_pass'] else 'FAIL'})")
     print()
@@ -239,6 +305,24 @@ def main():
             f"{summary['label_correct_rate']:>9.3f}{summary['confidence_pass_rate']:>9.3f}"
             f"{summary['failures']:>7}"
         )
+    print()
+    print("Correct-label confidence percentiles:")
+    for target, summary in sorted(by_language.items()):
+        percentile = summary["correct_label_confidence_percentiles"]
+        if percentile is None:
+            continue
+        print(
+            f"  {target:<4} n={percentile['count']:<4} "
+            f"min={percentile['min']:.3f} p5={percentile['p5']:.3f} "
+            f"p10={percentile['p10']:.3f} p25={percentile['p25']:.3f} "
+            f"p50={percentile['p50']:.3f} p75={percentile['p75']:.3f} "
+            f"p90={percentile['p90']:.3f} max={percentile['max']:.3f}"
+        )
+    print()
+    print("Threshold sweep (diagnostic only, frozen references):")
+    print(f"{'threshold':>9}{'accuracy':>11}{'pass':>6}")
+    for item in threshold_sweep:
+        print(f"{item['threshold']:>9.3f}{item['accuracy']:>11.4f}{'YES' if item['pass'] else 'NO':>6}")
     print()
     for target, summary in sorted(failure_languages.items()):
         print(
