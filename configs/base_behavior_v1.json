@@ -60,7 +60,14 @@
       "backend": "fasttext",
       "model_path": "/root/autodl-tmp/lid/lid.176.bin",
       "confidence_threshold": 0.70,
-      "english_span_threshold": 0.15
+      "english_span_threshold": 0.15,
+      "reference_gate": "top1_label_accuracy",
+      "english_span_threshold_status": "frozen_before_behavior_results",
+      "calibration": {
+        "report_path": "calibration_lid_report.json",
+        "candidate_thresholds": [0.0, 0.10, 0.20, 0.30, 0.40, 0.45, 0.50, 0.55, 0.60, 0.625, 0.65, 0.675, 0.687, 0.69, 0.70, 0.75],
+        "selection_rule": "highest_candidate_with_overall_accuracy_at_least_minimum"
+      }
     },
     "quality": {
       "metric": "sacrebleu_chrfpp"

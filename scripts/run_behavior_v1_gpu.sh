@@ -28,25 +28,31 @@ if [[ ! -f "$LID_MODEL" ]]; then
   echo "Missing fastText LID model: $LID_MODEL" >&2
   exit 2
 fi
-if [[ ! -d "$LHT_MODEL_ROOT" ]]; then
-  echo "Missing portable model root: $LHT_MODEL_ROOT" >&2
-  exit 2
-fi
-for model_directory in \
-  facebook__xglm-1.7B \
-  mistralai__Mistral-7B-v0.1 \
-  CohereLabs__aya-23-8B
-do
-  if [[ ! -d "$LHT_MODEL_ROOT/$model_directory" ]]; then
-    echo "Missing behavior model directory: $LHT_MODEL_ROOT/$model_directory" >&2
+if [[ "$STAGE" != "analyze" ]]; then
+  if [[ ! -d "$LHT_MODEL_ROOT" ]]; then
+    echo "Missing portable model root: $LHT_MODEL_ROOT" >&2
     exit 2
   fi
-done
+  for model_directory in \
+    facebook__xglm-1.7B \
+    mistralai__Mistral-7B-v0.1 \
+    CohereLabs__aya-23-8B
+  do
+    if [[ ! -d "$LHT_MODEL_ROOT/$model_directory" ]]; then
+      echo "Missing behavior model directory: $LHT_MODEL_ROOT/$model_directory" >&2
+      exit 2
+    fi
+  done
+fi
 
 echo "Model root: $LHT_MODEL_ROOT"
 echo "LID model: $LID_MODEL"
 
-"$PYTHON_BIN" -c "import numpy, torch, transformers, pandas, sklearn, statsmodels, sacrebleu, fasttext; assert int(numpy.__version__.split('.')[0]) < 2, 'behavior_v1 requires NumPy<2 for fasttext-wheel compatibility'; print('NumPy', numpy.__version__); print('CUDA', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NONE'); assert torch.cuda.is_available()"
+REQUIRE_CUDA=1
+if [[ "$STAGE" == "analyze" ]]; then
+  REQUIRE_CUDA=0
+fi
+"$PYTHON_BIN" -c "import numpy, torch, transformers, pandas, sklearn, statsmodels, sacrebleu, fasttext; assert int(numpy.__version__.split('.')[0]) < 2, 'behavior_v1 requires NumPy<2 for fasttext-wheel compatibility'; require_cuda=bool(int('$REQUIRE_CUDA')); available=torch.cuda.is_available(); print('NumPy', numpy.__version__); print('CUDA', available, torch.cuda.get_device_name(0) if available else 'NONE'); assert available or not require_cuda, 'this stage requires CUDA'"
 
 case "$STAGE" in
   all|prepare|generate|analyze)

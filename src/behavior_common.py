@@ -126,6 +126,27 @@ def behavior_settings(cfg) -> dict:
     minimum_batch_size = int(generation_runtime.get("minimum_batch_size", 1))
     if minimum_batch_size < 1 or maximum_batch_size < minimum_batch_size:
         raise ValueError("behavior_v1 generation runtime batch sizes are invalid")
+    language_id = dict(behavior.get("language_id", {}))
+    if language_id.get("reference_gate") != "top1_label_accuracy":
+        raise ValueError("behavior_v1 reference LID gate must use top1_label_accuracy")
+    if language_id.get("english_span_threshold_status") != "frozen_before_behavior_results":
+        raise ValueError("behavior_v1 English-span threshold must be explicitly frozen")
+    calibration = dict(language_id.get("calibration", {}))
+    report_path = str(calibration.get("report_path", "")).strip()
+    if not report_path:
+        raise ValueError("behavior_v1 LID calibration report_path is required")
+    candidates = sorted(set(map(float, calibration.get("candidate_thresholds", []))))
+    if not candidates or any(value < 0.0 or value > 1.0 for value in candidates):
+        raise ValueError("behavior_v1 LID calibration candidates must lie in [0, 1]")
+    if calibration.get("selection_rule") != (
+        "highest_candidate_with_overall_accuracy_at_least_minimum"
+    ):
+        raise ValueError("behavior_v1 LID calibration selection rule is not frozen")
+    language_id["calibration"] = {
+        "report_path": report_path,
+        "candidate_thresholds": candidates,
+        "selection_rule": calibration["selection_rule"],
+    }
     return {
         "protocol_version": BEHAVIOR_PROTOCOL_VERSION,
         "seed": int(behavior.get("seed", cfg.get("seed", 42))),
@@ -154,7 +175,7 @@ def behavior_settings(cfg) -> dict:
         )),
         "bootstrap_samples": int(behavior.get("bootstrap_samples", 1000)),
         "confidence_level": float(behavior.get("confidence_level", 0.95)),
-        "language_id": dict(behavior.get("language_id", {})),
+        "language_id": language_id,
         "quality": dict(behavior.get("quality", {})),
         "resources": resource_settings(cfg),
         "generation_runtime": {

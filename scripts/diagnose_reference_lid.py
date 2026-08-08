@@ -1,7 +1,8 @@
-"""Read-only diagnosis of fastText LID on frozen behavior_v1 reference texts.
+"""Read-only fastText LID calibration and formal reference audit.
 
-The script never writes experiment results. It loads the frozen reference-text
-task file (or any reference JSONL via --task-file) and reports, per target language:
+Calibration mode requires a manifested independent task file and permits the
+prespecified threshold sweep. Formal-audit mode reads only the frozen behavior
+task file, uses top-1 label accuracy, and never scans thresholds.
 
 - accuracy under the frozen confidence threshold, computed on the same
   (semantic_id, target_lang) audit units as evaluate_behavior_outputs.py;
@@ -19,6 +20,7 @@ script prints to stdout only.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -28,7 +30,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from behavior_common import behavior_settings, task_file
+from behavior_common import behavior_settings, sha256_file, stable_json_sha256, task_file
 from common import json_dumps_strict, load_config, read_jsonl
 
 
@@ -84,6 +86,12 @@ def main():
     )
     parser.add_argument("--config", required=True, help="behavior_v1 model config")
     parser.add_argument(
+        "--mode",
+        required=True,
+        choices=("calibration", "formal-audit"),
+        help="Calibration permits threshold scanning; formal-audit never does.",
+    )
+    parser.add_argument(
         "--task-file",
         default=None,
         help="Optional JSONL override with rows containing semantic_id, "
@@ -93,6 +101,11 @@ def main():
         "--output",
         default=None,
         help="Optional JSON path for the diagnostic report; stdout-only when omitted.",
+    )
+    parser.add_argument(
+        "--calibration-manifest",
+        default=None,
+        help="Required with --mode calibration; produced by build_lid_calibration_tasks.py.",
     )
     parser.add_argument(
         "--max-errors-per-language", type=int, default=10,
@@ -107,12 +120,36 @@ def main():
     config_path = Path(args.config).resolve()
     cfg = load_config(config_path)
     settings = behavior_settings(cfg)
-    if args.task_file:
+    calibration_manifest = None
+    if args.mode == "calibration":
+        if not args.task_file or not args.calibration_manifest:
+            raise ValueError(
+                "calibration mode requires --task-file and --calibration-manifest"
+            )
         task_path = Path(args.task_file).resolve()
         if not task_path.exists():
             raise FileNotFoundError(f"reference task file does not exist: {task_path}")
+        calibration_manifest_path = Path(args.calibration_manifest).resolve()
+        if not calibration_manifest_path.exists():
+            raise FileNotFoundError(
+                f"calibration manifest does not exist: {calibration_manifest_path}"
+            )
+        calibration_manifest = json.loads(
+            calibration_manifest_path.read_text(encoding="utf-8")
+        )
+        if calibration_manifest.get("protocol_version") != "behavior_v1_lid_calibration_v1":
+            raise ValueError("calibration manifest has the wrong protocol version")
+        if calibration_manifest.get("task_file_sha256") != sha256_file(task_path):
+            raise ValueError("calibration task file hash does not match its manifest")
+        if calibration_manifest.get("calibration_formal_overlap_count") != 0:
+            raise ValueError("calibration manifest does not confirm zero formal overlap")
         tasks = read_jsonl(task_path)
     else:
+        if args.task_file or args.calibration_manifest:
+            raise ValueError(
+                "formal-audit mode reads only the frozen behavior task file; "
+                "do not pass calibration inputs"
+            )
         task_path = task_file(cfg)
         if not task_path.exists():
             raise FileNotFoundError(
@@ -127,6 +164,21 @@ def main():
     }
     if missing_fields:
         raise ValueError(f"reference rows are missing fields: {sorted(missing_fields)}")
+    if calibration_manifest is not None:
+        semantic_ids = sorted({str(row["semantic_id"]) for row in tasks}, key=int)
+        expected_ids = sorted(
+            map(str, calibration_manifest.get("calibration_semantic_ids", [])), key=int
+        )
+        if semantic_ids != expected_ids:
+            raise ValueError("calibration semantic IDs do not match their manifest")
+        if stable_json_sha256(list(map(int, semantic_ids))) != calibration_manifest.get(
+            "calibration_semantic_ids_sha256"
+        ):
+            raise ValueError("calibration semantic-ID hash does not match its manifest")
+        expected_languages = list(calibration_manifest.get("languages", []))
+        observed_languages = sorted({str(row["target_lang"]) for row in tasks})
+        if sorted(expected_languages) != observed_languages:
+            raise ValueError("calibration languages do not match their manifest")
 
     lid = settings["language_id"]
     threshold = float(lid.get("confidence_threshold", 0.70))
@@ -185,16 +237,22 @@ def main():
     error_examples = {}
     for target in sorted({record["target_lang"] for record in records}):
         group = [record for record in records if record["target_lang"] == target]
-        correct = sum(record["correct"] for record in group)
+        thresholded_correct = sum(record["correct"] for record in group)
         label_correct = sum(record["label_correct"] for record in group)
         confidence_pass = sum(record["confidence_pass"] for record in group)
-        failures = [record for record in group if not record["correct"]]
+        primary_correct = (
+            thresholded_correct if args.mode == "calibration" else label_correct
+        )
+        failures = [
+            record for record in group
+            if not (record["correct"] if args.mode == "calibration" else record["label_correct"])
+        ]
         label_errors = [
             record for record in failures
             if not record["label_correct"] and not record["empty_reference"]
         ]
         threshold_only = [
-            record for record in failures
+            record for record in group
             if record["label_correct"] and not record["confidence_pass"]
         ]
         raw_counts = {}
@@ -235,10 +293,11 @@ def main():
             })
         by_language[target] = {
             "rows": len(group),
-            "correct": correct,
-            "accuracy": correct / len(group),
+            "correct": primary_correct,
+            "accuracy": primary_correct / len(group),
             "mean_confidence": mean_confidence,
             "label_correct_rate": label_correct / len(group),
+            "thresholded_accuracy": thresholded_correct / len(group),
             "confidence_pass_rate": confidence_pass / len(group),
             "failures": len(failures),
             "label_errors": len(label_errors),
@@ -251,7 +310,13 @@ def main():
             error_examples[target] = examples
 
     total = len(records)
-    total_correct = sum(record["correct"] for record in records)
+    total_label_correct = sum(record["label_correct"] for record in records)
+    total_thresholded_correct = sum(record["correct"] for record in records)
+    total_correct = (
+        total_thresholded_correct
+        if args.mode == "calibration"
+        else total_label_correct
+    )
     total_failures = total - total_correct
     overall_accuracy = total_correct / total
     failure_languages = {
@@ -260,29 +325,41 @@ def main():
         if summary["failures"] > 0
     }
 
-    threshold_candidates = sorted({
-        0.0, 0.10, 0.20, 0.30, 0.40, 0.45, 0.50, 0.55, 0.60,
-        0.625, 0.65, 0.675, 0.687, 0.69, 0.70, 0.75,
-    })
+    calibration_protocol = lid["calibration"]
+    threshold_candidates = calibration_protocol["candidate_thresholds"]
     threshold_sweep = []
-    for candidate in threshold_candidates:
-        passed = sum(
-            1 for record in records
-            if record["label_correct"] and record["confidence"] >= candidate
-        )
-        accuracy = passed / total
-        threshold_sweep.append({
-            "threshold": candidate,
-            "accuracy": accuracy,
-            "pass": bool(accuracy >= required_accuracy),
-            "recovered_correct": int(passed),
-        })
+    if args.mode == "calibration":
+        for candidate in threshold_candidates:
+            passed = sum(
+                1 for record in records
+                if record["label_correct"] and record["confidence"] >= candidate
+            )
+            accuracy = passed / total
+            threshold_sweep.append({
+                "threshold": candidate,
+                "accuracy": accuracy,
+                "pass": bool(accuracy >= required_accuracy),
+                "recovered_correct": int(passed),
+            })
+    passing_thresholds = [
+        item["threshold"] for item in threshold_sweep if item["pass"]
+    ]
+    selected_threshold = max(passing_thresholds) if passing_thresholds else None
 
     report = {
-        "protocol_version": "behavior_v1_reference_lid_diagnostic_v1",
+        "protocol_version": "behavior_v1_reference_lid_diagnostic_v2",
+        "mode": args.mode,
         "config_path": str(config_path),
         "task_file": str(task_path),
         "task_file_override": bool(args.task_file),
+        "calibration_manifest": (
+            str(Path(args.calibration_manifest).resolve())
+            if args.calibration_manifest else None
+        ),
+        "calibration_manifest_sha256": (
+            sha256_file(Path(args.calibration_manifest).resolve())
+            if args.calibration_manifest else None
+        ),
         "model_path": str(model_path),
         "confidence_threshold": threshold,
         "required_accuracy": required_accuracy,
@@ -291,20 +368,28 @@ def main():
         "audit_rows": total,
         "semantic_ids": len({record["semantic_id"] for record in records}),
         "overall_accuracy": overall_accuracy,
+        "overall_label_accuracy": total_label_correct / total,
+        "overall_thresholded_accuracy": total_thresholded_correct / total,
         "overall_pass": bool(overall_accuracy >= required_accuracy),
         "total_failures": total_failures,
         "failure_languages": failure_languages,
         "by_language": by_language,
         "failure_examples": error_examples,
         "threshold_sweep": threshold_sweep,
+        "threshold_selection_permitted": args.mode == "calibration",
+        "selected_threshold_by_frozen_rule": selected_threshold,
+        "threshold_selection_rule": (
+            calibration_protocol["selection_rule"]
+            if args.mode == "calibration" else None
+        ),
         "note": (
-            "Diagnostic threshold sweep is computed on the frozen evaluation "
-            "references and is for diagnosis only; the final frozen threshold "
-            "must be chosen on an independent calibration set before rerunning."
+            "Threshold selection uses only the independently manifested calibration set."
+            if args.mode == "calibration"
+            else "Formal reference audit uses top-1 label accuracy and does not scan thresholds."
         ),
     }
 
-    print(f"Reference LID diagnosis: {task_path}")
+    print(f"Reference LID diagnosis ({args.mode}): {task_path}")
     print(f"Model: {model_path}")
     print(f"Threshold: {threshold:.3f} | Required accuracy: {required_accuracy:.3f}")
     print(f"Audit units: {total} (task rows: {len(tasks)}; duplicate condition rows removed)")
@@ -338,11 +423,13 @@ def main():
             f"p90={percentile['p90']:.3f} max={percentile['max']:.3f}"
         )
     print()
-    print("Threshold sweep (diagnostic only, frozen references):")
-    print(f"{'threshold':>9}{'accuracy':>11}{'pass':>6}")
-    for item in threshold_sweep:
-        print(f"{item['threshold']:>9.3f}{item['accuracy']:>11.4f}{'YES' if item['pass'] else 'NO':>6}")
-    print()
+    if args.mode == "calibration":
+        print("Threshold sweep (independent calibration set only):")
+        print(f"{'threshold':>9}{'accuracy':>11}{'pass':>6}")
+        for item in threshold_sweep:
+            print(f"{item['threshold']:>9.3f}{item['accuracy']:>11.4f}{'YES' if item['pass'] else 'NO':>6}")
+        print(f"Selected by frozen rule: {selected_threshold}")
+        print()
     for target, summary in sorted(failure_languages.items()):
         print(
             f"== {target}: {summary['failures']} failures "

@@ -132,6 +132,14 @@ def main():
         blockers.append(f"missing file: {predictor_path}")
 
     formal_ready = bool(evaluation.get("formal_evaluation_ready", False))
+    calibrated_threshold = evaluation.get("lid_calibration_selected_threshold")
+    configured_threshold = float(settings["language_id"]["confidence_threshold"])
+    if not evaluation.get("lid_calibration_report_sha256"):
+        blockers.append("evaluation does not record an independent LID calibration report")
+    if calibrated_threshold is None or abs(
+        float(calibrated_threshold) - configured_threshold
+    ) > 1e-12:
+        blockers.append("evaluation LID threshold does not match the calibration report")
     reference_lid_accuracy = evaluation.get("reference_language_id_accuracy")
     required_lid_accuracy = float(cfg["behavior_v1"].get("minimum_reference_lid_accuracy", 0.95))
     if not formal_ready:

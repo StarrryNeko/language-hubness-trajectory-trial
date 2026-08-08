@@ -27,7 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from behavior_common import behavior_settings
-from common import load_config, read_jsonl, write_jsonl
+from behavior_common import sha256_file, stable_json_sha256
+from common import load_config, read_jsonl, write_json, write_jsonl
 
 
 def main():
@@ -48,6 +49,16 @@ def main():
     )
     parser.add_argument("--output", required=True, help="Calibration JSONL output path.")
     parser.add_argument(
+        "--manifest-output",
+        default=None,
+        help="Audit manifest path; defaults to <output>.manifest.json.",
+    )
+    parser.add_argument(
+        "--formal-data-manifest",
+        default=None,
+        help="Formal behavior dataset_manifest.json; defaults to output_dir/data.",
+    )
+    parser.add_argument(
         "--min-complete-groups", type=int, default=20,
         help="Minimum complete semantic groups before refusing to proceed.",
     )
@@ -57,6 +68,22 @@ def main():
     settings = behavior_settings(cfg)
     required_languages = ["en", *settings["evaluation_languages"]]
 
+    formal_manifest_path = Path(
+        args.formal_data_manifest
+        or (Path(cfg["output_dir"]) / "data" / "dataset_manifest.json")
+    ).resolve()
+    if not formal_manifest_path.exists():
+        raise FileNotFoundError(
+            f"formal behavior dataset manifest does not exist: {formal_manifest_path}"
+        )
+    formal_manifest = json.loads(formal_manifest_path.read_text(encoding="utf-8"))
+    raw_formal_ids = formal_manifest.get("selected_semantic_indices")
+    if not isinstance(raw_formal_ids, list) or not raw_formal_ids:
+        raise ValueError(
+            "formal behavior dataset manifest has no selected_semantic_indices"
+        )
+    formal_ids = {int(value) for value in raw_formal_ids}
+
     exclusion_path = Path(args.exclusions)
     if not exclusion_path.exists():
         raise FileNotFoundError(f"exclusion manifest does not exist: {exclusion_path}")
@@ -65,6 +92,13 @@ def main():
     if not isinstance(raw_indices, list) or not raw_indices:
         raise ValueError(f"exclusion manifest has no selected_semantic_indices: {exclusion_path}")
     excluded_ids = {int(value) for value in raw_indices}
+    if int(manifest.get("union_count", -1)) != len(excluded_ids):
+        raise ValueError("exclusion manifest union_count does not match its unique IDs")
+    overlap = sorted(excluded_ids & formal_ids)
+    if overlap:
+        raise ValueError(
+            f"calibration and formal behavior semantic IDs overlap: {overlap[:5]}"
+        )
 
     texts = {}
     source_files = []
@@ -88,7 +122,11 @@ def main():
                     f"conflicting parallel text for semantic_id={key[0]} lang={key[1]}: {path}"
                 )
             texts[key] = text
-        source_files.append(str(path.resolve()))
+        source_files.append({
+            "path": str(path.resolve()),
+            "sha256": sha256_file(path),
+            "rows": len(rows),
+        })
 
     available_ids = {key[0] for key in texts}
     excluded_available = sorted(excluded_ids & available_ids)
@@ -110,6 +148,12 @@ def main():
             f"only {len(complete_ids)} complete calibration groups "
             f"(required >= {args.min_complete_groups}); add more parallel sample files"
         )
+    if missing_ids or incomplete_ids or set(complete_ids) != excluded_ids:
+        raise ValueError(
+            "calibration sources must contain every excluded semantic ID with every "
+            f"required language: missing_ids={len(missing_ids)}, "
+            f"incomplete_ids={len(incomplete_ids)}"
+        )
 
     rows = []
     for semantic_id in sorted(complete_ids):
@@ -122,8 +166,34 @@ def main():
 
     output_path = Path(args.output)
     write_jsonl(output_path, rows)
+    manifest_path = Path(args.manifest_output or f"{output_path}.manifest.json")
+    calibration_manifest = {
+        "protocol_version": "behavior_v1_lid_calibration_v1",
+        "config_path": str(Path(args.config).resolve()),
+        "task_file": str(output_path.resolve()),
+        "task_file_sha256": sha256_file(output_path),
+        "rows": len(rows),
+        "languages": required_languages,
+        "rows_per_language": {
+            language: sum(row["target_lang"] == language for row in rows)
+            for language in required_languages
+        },
+        "calibration_semantic_ids": sorted(complete_ids),
+        "calibration_semantic_ids_sha256": stable_json_sha256(sorted(complete_ids)),
+        "calibration_semantic_id_count": len(complete_ids),
+        "exclusion_manifest": str(exclusion_path.resolve()),
+        "exclusion_manifest_sha256": sha256_file(exclusion_path),
+        "formal_data_manifest": str(formal_manifest_path),
+        "formal_data_manifest_sha256": sha256_file(formal_manifest_path),
+        "formal_selected_semantic_ids_sha256": stable_json_sha256(sorted(formal_ids)),
+        "formal_selected_semantic_id_count": len(formal_ids),
+        "calibration_formal_overlap_count": 0,
+        "source_files": source_files,
+    }
+    write_json(manifest_path, calibration_manifest)
 
     print(f"Calibration LID tasks: {output_path}")
+    print(f"Calibration manifest: {manifest_path}")
     print(f"Excluded IDs: {len(excluded_ids)} | available in samples: {len(excluded_available)}")
     print(f"Complete groups: {len(complete_ids)} | rows: {len(rows)}")
     if missing_ids:
@@ -136,7 +206,7 @@ def main():
     print("Languages:", required_languages)
     print("Sources:")
     for source in source_files:
-        print(f"  {source}")
+        print(f"  {source['path']} sha256={source['sha256']}")
 
 
 if __name__ == "__main__":

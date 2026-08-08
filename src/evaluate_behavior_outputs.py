@@ -117,12 +117,78 @@ def quality_scorer():
         return "character_fscore_smoke_only", character_fscore
 
 
+def classify_language_behavior(
+    predicted_language,
+    confidence,
+    target_language,
+    english_span_fraction,
+    confidence_threshold,
+    english_span_threshold,
+):
+    """Apply the frozen output-side LID rules to one generation."""
+    confidence_pass = float(confidence) >= float(confidence_threshold)
+    retention = int(predicted_language == target_language and confidence_pass)
+    leakage = (
+        np.nan
+        if target_language == "en"
+        else int(
+            (predicted_language == "en" and confidence_pass)
+            or float(english_span_fraction) >= float(english_span_threshold)
+        )
+    )
+    return retention, leakage
+
+
+def load_frozen_calibration_report(config_path, cfg, settings):
+    calibration = settings["language_id"]["calibration"]
+    configured = Path(calibration["report_path"])
+    candidates = (
+        [configured]
+        if configured.is_absolute()
+        else [Path.cwd() / configured, Path(config_path).resolve().parents[1] / configured]
+    )
+    report_path = next((path for path in candidates if path.exists()), candidates[0])
+    if not report_path.exists():
+        raise FileNotFoundError(
+            f"frozen LID calibration report does not exist: {report_path}"
+        )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    if report.get("mode") != "calibration":
+        raise ValueError("LID calibration report is not from calibration mode")
+    if report.get("threshold_selection_permitted") is not True:
+        raise ValueError("LID calibration report does not permit threshold selection")
+    selected = report.get("selected_threshold_by_frozen_rule")
+    if selected is None:
+        raise ValueError("no LID threshold passed the frozen calibration rule")
+    configured_threshold = float(settings["language_id"]["confidence_threshold"])
+    report_candidates = [float(item["threshold"]) for item in report.get("threshold_sweep", [])]
+    if report_candidates != calibration["candidate_thresholds"]:
+        raise ValueError("LID calibration candidates do not match the frozen config")
+    if report.get("threshold_selection_rule") != calibration["selection_rule"]:
+        raise ValueError("LID calibration selection rule does not match the frozen config")
+    required_accuracy = float(cfg["behavior_v1"]["minimum_reference_lid_accuracy"])
+    if not np.isclose(
+        float(report.get("required_accuracy", -1.0)), required_accuracy, rtol=0.0, atol=1e-12
+    ):
+        raise ValueError("LID calibration accuracy gate does not match the frozen config")
+    if not np.isclose(float(selected), configured_threshold, rtol=0.0, atol=1e-12):
+        raise ValueError(
+            "configured LID confidence_threshold does not match the independently "
+            f"selected threshold: configured={configured_threshold}, selected={selected}"
+        )
+    return report_path, report
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate behavior_v1 generations")
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
-    cfg = load_config(args.config)
+    config_path = Path(args.config).resolve()
+    cfg = load_config(config_path)
     settings = behavior_settings(cfg)
+    calibration_report_path, calibration_report = load_frozen_calibration_report(
+        config_path, cfg, settings
+    )
     paths = ensure_behavior_dirs(cfg)
     tasks = {str(row["task_id"]): row for row in load_tasks(cfg)}
     generations = read_jsonl(generation_file(cfg))
@@ -136,11 +202,13 @@ def main():
         predicted, confidence = identifier.predict(text)
         english_fraction = identifier.english_span_fraction(text)
         target = str(task["target_lang"])
-        retention = int(predicted == target and confidence >= identifier.threshold)
-        leakage = (
-            np.nan if target == "en" else int(
-                predicted == "en" or english_fraction >= identifier.english_span_threshold
-            )
+        retention, leakage = classify_language_behavior(
+            predicted,
+            confidence,
+            target,
+            english_fraction,
+            identifier.threshold,
+            identifier.english_span_threshold,
         )
         reference_label, reference_confidence = identifier.predict(task["reference_text"])
         label_correct = int(reference_label == target)
@@ -224,10 +292,19 @@ def main():
         "language_id_backend": identifier.backend,
         "language_id_confidence_threshold": identifier.threshold,
         "english_span_threshold": identifier.english_span_threshold,
+        "output_lid_rule": (
+            "full-output labels require confidence_threshold; English spans require "
+            "per-token confidence_threshold and english_span_threshold"
+        ),
         "reference_language_id_accuracy": float(audit.correct.mean()),
         "reference_language_id_label_accuracy": float(audit.correct.mean()),
         "reference_language_id_thresholded_accuracy": float(audit.thresholded.mean()),
         "reference_language_id_rows_csv": "language_id_reference_rows.csv",
+        "lid_calibration_report": str(calibration_report_path.resolve()),
+        "lid_calibration_report_sha256": sha256_file(calibration_report_path),
+        "lid_calibration_selected_threshold": calibration_report[
+            "selected_threshold_by_frozen_rule"
+        ],
         "quality_backend": quality_backend,
         "resources": settings["resources"],
         "formal_evaluation_ready": (

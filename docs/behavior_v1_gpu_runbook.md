@@ -43,6 +43,8 @@ $LHT_MODEL_ROOT/
 
 ## 1. 一条命令运行全部流程
 
+正式重跑前必须先完成独立 LID 校准；未生成并核验校准 manifest 时不要运行本节命令。
+
 ```bash
 bash scripts/run_behavior_v1_gpu.sh all 2>&1 | tee behavior_v1_all.log
 ```
@@ -50,6 +52,26 @@ bash scripts/run_behavior_v1_gpu.sh all 2>&1 | tee behavior_v1_all.log
 脚本自动设置 OpenMP、MKL、OpenBLAS、NumExpr 为 24 线程，检查 CUDA、fastText、SacreBLEU 和 statsmodels，然后依次运行抽样、hidden states、checkpoint audit、任务构造、GPU 几何预测量、生成、评估、关联回归、验证和三模型汇总。
 
 ## 2. 推荐的分阶段运行
+
+### 阶段 0：构建并诊断独立 LID 校准集
+
+```bash
+python scripts/build_lid_calibration_tasks.py \
+  --config configs/xglm_1b7_behavior_v1.json \
+  --parallel-samples outputs_week1/xglm_1b7_random200/data/parallel_samples.jsonl \
+  --parallel-samples outputs_replication_seed20260806/xglm_1b7_random200/data/parallel_samples.jsonl \
+  --formal-data-manifest outputs_behavior_v1/xglm_1b7/data/dataset_manifest.json \
+  --output calibration_lid_tasks.jsonl
+
+python scripts/diagnose_reference_lid.py \
+  --mode calibration \
+  --config configs/xglm_1b7_behavior_v1.json \
+  --task-file calibration_lid_tasks.jsonl \
+  --calibration-manifest calibration_lid_tasks.jsonl.manifest.json \
+  --output calibration_lid_report.json
+```
+
+只有 manifest 显示 `calibration_formal_overlap_count=0`，且报告按冻结规则给出阈值后，才允许把该阈值写入配置并提交。正式参考审计使用 `--mode formal-audit`，该模式不会产生阈值扫描。
 
 ### 阶段 A：准备数据、hidden states 和几何预测量
 

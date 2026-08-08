@@ -1,4 +1,6 @@
 import sys
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,11 +11,67 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from common import select_semantic_indices_excluding
 from compute_behavior_association import benjamini_hochberg
 from evaluate_behavior_outputs import LanguageIdentifier
+from evaluate_behavior_outputs import classify_language_behavior, load_frozen_calibration_report
 from export_behavior_predictors import align_semantic_ids, similarity_matrices
 from prepare_behavior_tasks import build_tasks
 
 
 class BehaviorV1Tests(unittest.TestCase):
+    def test_low_confidence_english_label_is_not_leakage(self):
+        retention, leakage = classify_language_behavior(
+            "en", 0.42, "sw", 0.0, 0.70, 0.15
+        )
+        self.assertEqual(retention, 0)
+        self.assertEqual(leakage, 0)
+
+    def test_confident_english_label_or_span_is_leakage(self):
+        _, confident_label = classify_language_behavior(
+            "en", 0.91, "sw", 0.0, 0.70, 0.15
+        )
+        _, confident_span = classify_language_behavior(
+            "sw", 0.91, "sw", 0.20, 0.70, 0.15
+        )
+        self.assertEqual(confident_label, 1)
+        self.assertEqual(confident_span, 1)
+
+    def test_english_target_has_no_unnecessary_leakage_outcome(self):
+        retention, leakage = classify_language_behavior(
+            "en", 0.91, "en", 1.0, 0.70, 0.15
+        )
+        self.assertEqual(retention, 1)
+        self.assertTrue(np.isnan(leakage))
+
+    def test_evaluation_requires_configured_threshold_to_match_calibration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config_dir = root / "configs"
+            config_dir.mkdir()
+            config_path = config_dir / "model.json"
+            config_path.write_text("{}", encoding="utf-8")
+            report_path = root / "calibration_lid_report.json"
+            report_path.write_text(json.dumps({
+                "mode": "calibration",
+                "threshold_selection_permitted": True,
+                "selected_threshold_by_frozen_rule": 0.70,
+                "required_accuracy": 0.95,
+                "threshold_sweep": [{"threshold": 0.70}],
+                "threshold_selection_rule": "highest_candidate_with_overall_accuracy_at_least_minimum",
+            }), encoding="utf-8")
+            settings = {"language_id": {
+                "confidence_threshold": 0.70,
+                "calibration": {
+                    "report_path": "calibration_lid_report.json",
+                    "candidate_thresholds": [0.70],
+                    "selection_rule": "highest_candidate_with_overall_accuracy_at_least_minimum",
+                },
+            }}
+            cfg = {"behavior_v1": {"minimum_reference_lid_accuracy": 0.95}}
+            resolved, _ = load_frozen_calibration_report(config_path, cfg, settings)
+            self.assertEqual(resolved, report_path)
+            settings["language_id"]["confidence_threshold"] = 0.65
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                load_frozen_calibration_report(config_path, cfg, settings)
+
     def make_config(self):
         languages = ["en", "zh", "ar", "hi", "es"]
         return {
@@ -31,7 +89,16 @@ class BehaviorV1Tests(unittest.TestCase):
                 "decoding": {"do_sample": False, "num_beams": 1},
                 "primary_layer": 2,
                 "analysis_layers": [1, 2, 3],
-                "language_id": {"backend": "script_heuristic"},
+                "language_id": {
+                    "backend": "script_heuristic",
+                    "reference_gate": "top1_label_accuracy",
+                    "english_span_threshold_status": "frozen_before_behavior_results",
+                    "calibration": {
+                        "report_path": "calibration_lid_report.json",
+                        "candidate_thresholds": [0.7],
+                        "selection_rule": "highest_candidate_with_overall_accuracy_at_least_minimum",
+                    },
+                },
             },
         }
 

@@ -19,7 +19,9 @@
 
 ## 指标与统计
 
-主要行为指标为目标语言保持、非必要英语泄漏和 sentence-level chrF++。正式结果要求 fastText LID、参考译文 LID 准确率至少 0.95、SacreBLEU chrF++，并要求空输出率不超过 1%。脚本启发式 LID 和字符 F-score 只允许本地 smoke test。
+主要行为指标为目标语言保持、非必要英语泄漏和 sentence-level chrF++。参考译文门禁使用 fastText top-1 标签正确率且至少达到 0.95；参考文本置信度不参与该门禁。输出侧目标语言保持和整段英语判定必须同时满足冻结的 fastText 置信度阈值；英语片段判定继续使用结果揭示前冻结的 `english_span_threshold=0.15`。正式结果还要求 SacreBLEU chrF++，并要求空输出率不超过 1%。脚本启发式 LID 和字符 F-score 只允许本地 smoke test。
+
+fastText 置信度阈值只能在独立校准集上扫描。校准集固定使用两个几何 seed 的 363 个语义 ID，必须通过 manifest 验证来源文件哈希、排除清单哈希、任务文件哈希，并证明与 208 个正式行为语义 ID 的交集为零。正式行为参考集只允许 top-1 标签审计，禁止阈值搜索。
 
 关联模型仅使用非英→非英任务，加入源语言和目标语言固定效应、源句和目标句 token 数控制，并按语义 ID 计算 cluster-robust 标准误。确认性检验不参与多重校正；其余层、局部缩放、hubness、范数、质心距离、PC1 和局部密度检验统一在单模型内做 Benjamini–Hochberg 校正。
 

@@ -46,6 +46,15 @@ class BehaviorExportIntegrationTests(unittest.TestCase):
                     "analysis_layers": [1, 2, 3],
                     "local_scaling_k": 2,
                     "decoding": {"do_sample": False, "num_beams": 1},
+                    "language_id": {
+                        "reference_gate": "top1_label_accuracy",
+                        "english_span_threshold_status": "frozen_before_behavior_results",
+                        "calibration": {
+                            "report_path": "calibration_lid_report.json",
+                            "candidate_thresholds": [0.7],
+                            "selection_rule": "highest_candidate_with_overall_accuracy_at_least_minimum",
+                        },
+                    },
                     "resources": {
                         "cpu_threads": 2, "evaluation_workers": 2,
                         "geometry_device": "cpu", "geometry_dtype": "float32",
