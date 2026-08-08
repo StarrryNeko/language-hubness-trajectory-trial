@@ -71,8 +71,24 @@ def extract_answer(text, method):
     raise ValueError(f"unsupported behavior output_extraction: {method}")
 
 
+def prompt_forbidden_token_ids(tokenizer):
+    """Return control-token IDs forbidden in plain-text prompt encoding.
+
+    A tokenizer may emit its unknown-token ID for ordinary text that is outside
+    its vocabulary even when add_special_tokens=False.  That is a vocabulary
+    coverage event, not an automatically inserted prompt control token.
+    """
+    forbidden = set(map(int, tokenizer.all_special_ids))
+    unknown_id = tokenizer.unk_token_id
+    if unknown_id is not None:
+        forbidden.discard(int(unknown_id))
+    return forbidden
+
+
 def audit_prompt_lengths(tokenizer, tasks, decoding, forbidden_ids, batch_size=128):
     records = []
+    unknown_id = tokenizer.unk_token_id
+    unknown_counts = []
     for start in range(0, len(tasks), int(batch_size)):
         batch = tasks[start : start + int(batch_size)]
         encoded = tokenizer(
@@ -82,17 +98,24 @@ def audit_prompt_lengths(tokenizer, tasks, decoding, forbidden_ids, batch_size=1
             add_special_tokens=decoding["prompt_add_special_tokens"],
         )
         for task, token_ids in zip(batch, encoded["input_ids"]):
-            found = sorted(set(map(int, token_ids)) & forbidden_ids)
+            integer_ids = list(map(int, token_ids))
+            found = sorted(set(integer_ids) & forbidden_ids)
             if found:
                 raise ValueError(
-                    f"behavior prompt contains tokenizer special tokens: "
+                    f"behavior prompt contains tokenizer control tokens: "
                     f"task={task['task_id']}, token_ids={found}"
                 )
-            records.append((str(task["task_id"]), len(token_ids)))
+            unknown_counts.append(
+                0 if unknown_id is None else integer_ids.count(int(unknown_id))
+            )
+            records.append((str(task["task_id"]), len(integer_ids)))
     lengths = np.asarray([length for _, length in records], dtype=int)
     longest_task, maximum = max(records, key=lambda value: value[1])
+    total_prompt_tokens = int(lengths.sum())
+    total_unknown_tokens = int(sum(unknown_counts))
     summary = {
         "tasks": len(records),
+        "total_prompt_tokens": total_prompt_tokens,
         "minimum_prompt_tokens": int(lengths.min()),
         "median_prompt_tokens": float(np.median(lengths)),
         "p95_prompt_tokens": float(np.quantile(lengths, 0.95)),
@@ -100,6 +123,16 @@ def audit_prompt_lengths(tokenizer, tasks, decoding, forbidden_ids, batch_size=1
         "maximum_prompt_tokens_observed": int(maximum),
         "longest_task_id": longest_task,
         "configured_max_prompt_tokens": int(decoding["max_prompt_tokens"]),
+        "prompt_unknown_token_id": (
+            None if unknown_id is None else int(unknown_id)
+        ),
+        "prompt_unknown_token_count": total_unknown_tokens,
+        "prompt_unknown_token_fraction": (
+            total_unknown_tokens / total_prompt_tokens if total_prompt_tokens else 0.0
+        ),
+        "tasks_with_prompt_unknown_tokens": int(
+            sum(count > 0 for count in unknown_counts)
+        ),
     }
     return summary, {task_id: length for task_id, length in records}
 
@@ -178,8 +211,9 @@ def main():
     forbidden_ids = set(map(int, tokenizer.all_special_ids))
     if not forbidden_ids:
         raise ValueError("tokenizer exposes no special-token inventory for generation auditing")
+    prompt_forbidden_ids = prompt_forbidden_token_ids(tokenizer)
     prompt_audit, prompt_tokens_by_task = audit_prompt_lengths(
-        tokenizer, tasks, decoding, forbidden_ids
+        tokenizer, tasks, decoding, prompt_forbidden_ids
     )
     if prompt_audit["maximum_prompt_tokens_observed"] > decoding["max_prompt_tokens"]:
         write_json(paths.generations / "prompt_length_audit.json", prompt_audit)
