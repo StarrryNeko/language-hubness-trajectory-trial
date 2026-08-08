@@ -143,13 +143,20 @@ def main():
             )
         )
         reference_label, reference_confidence = identifier.predict(task["reference_text"])
+        label_correct = int(reference_label == target)
+        confidence_pass = int(reference_confidence >= identifier.threshold)
         audit_row = {
             "semantic_id": str(task["semantic_id"]),
             "target_lang": target,
-            "correct": int(
-                reference_label == target and reference_confidence >= identifier.threshold
-            ),
+            "predicted_language": reference_label,
+            "label_correct": label_correct,
             "confidence": reference_confidence,
+            "confidence_pass": confidence_pass,
+            "thresholded": int(bool(label_correct) and bool(confidence_pass)),
+            # The reference-language gate is the fastText top-1 label. The
+            # confidence threshold remains an output-side decision rule for
+            # retention and English leakage, so it does not gate the audit.
+            "correct": label_correct,
         }
         record = {
             "task_id": task["task_id"],
@@ -203,8 +210,11 @@ def main():
     audit = pd.DataFrame(reference_audit).drop_duplicates(
         ["semantic_id", "target_lang"]
     )
+    audit.to_csv(paths.metrics / "language_id_reference_rows.csv", index=False, encoding="utf-8")
     calibration = audit.groupby("target_lang", as_index=False).agg(
-        rows=("correct", "size"), accuracy=("correct", "mean"),
+        rows=("correct", "size"),
+        accuracy=("correct", "mean"),
+        thresholded_accuracy=("thresholded", "mean"),
         mean_confidence=("confidence", "mean"),
     )
     calibration.to_csv(paths.metrics / "language_id_reference_audit.csv", index=False, encoding="utf-8")
@@ -215,6 +225,9 @@ def main():
         "language_id_confidence_threshold": identifier.threshold,
         "english_span_threshold": identifier.english_span_threshold,
         "reference_language_id_accuracy": float(audit.correct.mean()),
+        "reference_language_id_label_accuracy": float(audit.correct.mean()),
+        "reference_language_id_thresholded_accuracy": float(audit.thresholded.mean()),
+        "reference_language_id_rows_csv": "language_id_reference_rows.csv",
         "quality_backend": quality_backend,
         "resources": settings["resources"],
         "formal_evaluation_ready": (

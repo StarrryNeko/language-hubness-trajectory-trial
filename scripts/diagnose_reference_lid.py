@@ -1,7 +1,7 @@
 """Read-only diagnosis of fastText LID on frozen behavior_v1 reference texts.
 
 The script never writes experiment results. It loads the frozen reference-text
-task file and reports, per target language:
+task file (or any reference JSONL via --task-file) and reports, per target language:
 
 - accuracy under the frozen confidence threshold, computed on the same
   (semantic_id, target_lang) audit units as evaluate_behavior_outputs.py;
@@ -84,6 +84,12 @@ def main():
     )
     parser.add_argument("--config", required=True, help="behavior_v1 model config")
     parser.add_argument(
+        "--task-file",
+        default=None,
+        help="Optional JSONL override with rows containing semantic_id, "
+             "target_lang, and reference_text.",
+    )
+    parser.add_argument(
         "--output",
         default=None,
         help="Optional JSON path for the diagnostic report; stdout-only when omitted.",
@@ -101,14 +107,26 @@ def main():
     config_path = Path(args.config).resolve()
     cfg = load_config(config_path)
     settings = behavior_settings(cfg)
-    task_path = task_file(cfg)
-    if not task_path.exists():
-        raise FileNotFoundError(
-            f"behavior task file does not exist; run prepare_behavior_tasks.py first: {task_path}"
-        )
-    tasks = read_jsonl(task_path)
+    if args.task_file:
+        task_path = Path(args.task_file).resolve()
+        if not task_path.exists():
+            raise FileNotFoundError(f"reference task file does not exist: {task_path}")
+        tasks = read_jsonl(task_path)
+    else:
+        task_path = task_file(cfg)
+        if not task_path.exists():
+            raise FileNotFoundError(
+                f"behavior task file does not exist; run prepare_behavior_tasks.py first: {task_path}"
+            )
+        tasks = read_jsonl(task_path)
     if not tasks:
-        raise ValueError(f"behavior task file is empty: {task_path}")
+        raise ValueError(f"reference task file is empty: {task_path}")
+    missing_fields = {
+        field for field in ("semantic_id", "target_lang", "reference_text")
+        if field not in tasks[0]
+    }
+    if missing_fields:
+        raise ValueError(f"reference rows are missing fields: {sorted(missing_fields)}")
 
     lid = settings["language_id"]
     threshold = float(lid.get("confidence_threshold", 0.70))
@@ -264,6 +282,7 @@ def main():
         "protocol_version": "behavior_v1_reference_lid_diagnostic_v1",
         "config_path": str(config_path),
         "task_file": str(task_path),
+        "task_file_override": bool(args.task_file),
         "model_path": str(model_path),
         "confidence_threshold": threshold,
         "required_accuracy": required_accuracy,
